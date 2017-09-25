@@ -98,7 +98,7 @@ typedef uint64_t ipp_arg_t;
 /**
  * declare variable needed for ipp serialization
  */
-#define IPP_SERIALIZE_VAR	int ipp_offset;
+#define IPP_SERIALIZE_VAR	int ipp_offset
 /**
  * Put in function start to init the serialization coding
  *
@@ -131,8 +131,8 @@ typedef uint64_t ipp_arg_t;
  *
  */
 #define IPP_SERIALIZE_START(ipp_args, n_args)\
-		do {ipp_offset = IPP_ALIGN_OFFSET((char *)(&ipp_args[n_args]) -\
-			(char *)ipp_args); } while (0)
+	(ipp_offset = IPP_ALIGN_OFFSET((char *)(&ipp_args[n_args]) - \
+	(char *)ipp_args))
 
 /**
  * @brief Serialize scalar argument
@@ -191,7 +191,7 @@ typedef uint64_t ipp_arg_t;
  * best use after all @ref IPP_OUT_ARG_PTR or @ref IPP_SET_ARG_PTR done to get
  * full payload
  **/
-#define IPP_SERIALIZE_PAYLAOD() ipp_offset
+#define IPP_SERIALIZE_PAYLAOD() (ipp_offset + IPP_WORK_HDR_SIZE)
 
 /**
  * de-serialize and argument that was passed by value
@@ -231,8 +231,8 @@ typedef uint64_t ipp_arg_t;
  * IPP_GET_ARG_PTR(args,2,parg2);
  * @endcode
  */
-#define IPP_GET_ARG_PTR(ipp_args, n, p) do {p = (void *)((char *)ipp_args +\
-		ipp_args[n]) ;} while (0)
+#define IPP_GET_ARG_PTR(ipp_args, n, p) (p = (void *)((char *)ipp_args + \
+	ipp_args[n]))
 
 
 
@@ -265,6 +265,20 @@ enum stmvl53l1_ipp_proccesing_e {
 	 */
 	stmvl53l1_ipp_cal_hist = 1,
 	/*!< stmvl53l1_ipp_cal_hist process cal hist*/
+
+	stmvl53l1_ipp_xtalk_calibration = 2,
+	/*!< stmvl53l1_ipp_xtalk_calibration process crosstalk calibration data
+	 */
+
+	stmvl53l1_ipp_hist_ambient_dmax = 3,
+	/*!< stmvl53l1_ipp_hist_ambient_dmax process ambient dmac calculation
+	 * from histogram
+	 */
+
+	stmvl53l1_ipp_generate_dual_reflectance_xtalk_samples = 4,
+	/*!< stmvl53l1_ipp_generate_dual_reflectance_xtalk_samples process
+	 * Xtalk data from dual reflectance histogram data
+	 */
 
 	/** keep last*/
 	stmvl53l1_ipp_max /*!< stmvl53l1_ipp_max */
@@ -306,7 +320,7 @@ struct ipp_work_t {
  * we substract size of of item above
  * must be lesss than one netlink packet
 */
-#define MAX_IPP_DATA	((1024-4*3)/8)
+#define MAX_IPP_DATA	((4096-4*3)/8)
 	ipp_arg_t data[MAX_IPP_DATA];	/*!< [in][out] */
 };
 
@@ -318,7 +332,7 @@ struct ipp_work_t {
 /**
  * max payload per ipp transfer
  */
-#define IPP_WORK_MAX_PAYLAOD	sizeof(struct ipp_work_t)
+#define IPP_WORK_MAX_PAYLOAD	sizeof(struct ipp_work_t)
 
 /** copy ipp header from src to dest
  *
@@ -354,9 +368,9 @@ static inline void ipp_dump_work(struct ipp_work_t *pw, uint32_t max_data,
 	IPP_PRINT("status %d\n",  pw->status);
 	IPP_PRINT("Xfer id 0x%08X payload  %d bytes (%s)\n", pw->xfer_id,
 			pw->payload,
-			pw->payload > IPP_WORK_MAX_PAYLAOD ? "invalid" : "ok");
-	data_cnt = pw->payload > IPP_WORK_MAX_PAYLAOD ?
-			IPP_WORK_MAX_PAYLAOD : pw->payload;
+			pw->payload > IPP_WORK_MAX_PAYLOAD ? "invalid" : "ok");
+	data_cnt = pw->payload > IPP_WORK_MAX_PAYLOAD ?
+			IPP_WORK_MAX_PAYLOAD : pw->payload;
 	data_cnt  = data_cnt > max_data ? max_data : data_cnt;
 	for (i = 0, pbdata = (uint8_t *)pw->data; i < data_cnt; i++) {
 		if (i%16 == 0)

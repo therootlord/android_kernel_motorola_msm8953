@@ -2,7 +2,8 @@
 /*
 * Copyright (c) 2016, STMicroelectronics - All Rights Reserved
 *
-* This file is part of VL53L1 Core and is dual licensed, either 'STMicroelectronics Proprietary license'
+* This file is part of VL53L1 Core and is dual licensed, either 'STMicroelectronics
+* Proprietary license'
 * or 'BSD 3-clause "New" or "Revised" License' , at your option.
 *
 ********************************************************************************
@@ -11,7 +12,8 @@
 *
 ********************************************************************************
 *
-* License terms: STMicroelectronics Proprietary in accordance with licensing terms at www.st.com/sla0044
+* License terms: STMicroelectronics Proprietary in accordance with licensing
+* terms at www.st.com/sla0044
 *
 * STMicroelectronics confidential
 * Reproduction and Communication of this document is strictly prohibited unless
@@ -21,7 +23,8 @@
 ********************************************************************************
 *
 * Alternatively, VL53L1 Core may be distributed under the terms of
-* 'BSD 3-clause "New" or "Revised" License', in which case the following provisions apply instead of the ones
+* 'BSD 3-clause "New" or "Revised" License', in which case the following
+* provisions apply instead of the ones
 * mentioned above :
 *
 ********************************************************************************
@@ -97,7 +100,6 @@
 #include "vl53l1_ll_def.h"
 #include "vl53l1_platform.h"
 #include "vl53l1_register_map.h"
-#include "vl53l1_register_settings.h"
 #include "vl53l1_core.h"
 #include "vl53l1_silicon_core.h"
 
@@ -110,12 +112,7 @@
 	_LOG_FUNCTION_END_FMT(VL53L1_TRACE_MODULE_CORE, status, fmt, ##__VA_ARGS__)
 
 
-#define trace_print(level, ...) \
-	VL53L1_trace_print_module_function(VL53L1_TRACE_MODULE_CORE, level, VL53L1_TRACE_FUNCTION_NONE, ##__VA_ARGS__)
-
-
-
-VL53L1_Error VL53L1_FCTN_00216(
+VL53L1_Error VL53L1_is_firmware_ready_silicon(
 	VL53L1_DEV     Dev,
 	uint8_t       *pready)
 {
@@ -130,7 +127,7 @@ VL53L1_Error VL53L1_FCTN_00216(
 	VL53L1_Error status = VL53L1_ERROR_NONE;
 	VL53L1_LLDriverData_t *pdev = VL53L1DevStructGetLLDriverHandle(Dev);
 
-	uint8_t  comms_buffer[VL53L1_MAX_I2C_XFER_SIZE];
+	uint8_t  comms_buffer[5];
 
 	LOG_FUNCTION_START("");
 
@@ -139,27 +136,27 @@ VL53L1_Error VL53L1_FCTN_00216(
 
 	status = VL53L1_ReadMulti(
 					Dev,
-					VL53L1_DEF_00169,
+					VL53L1_INTERRUPT_MANAGER__ENABLES,
 					comms_buffer,
 					5);
 
 	if (status == VL53L1_ERROR_NONE) {
 
-		pdev->VL53L1_PRM_00047.VL53L1_PRM_00315 =
+		pdev->dbg_results.interrupt_manager__enables =
 				comms_buffer[0];
-		pdev->VL53L1_PRM_00047.VL53L1_PRM_00316 =
+		pdev->dbg_results.interrupt_manager__clear =
 				comms_buffer[1];
-		pdev->VL53L1_PRM_00047.VL53L1_PRM_00317 =
+		pdev->dbg_results.interrupt_manager__status =
 				comms_buffer[2];
-		pdev->VL53L1_PRM_00047.VL53L1_PRM_00318 =
+		pdev->dbg_results.mcu_to_host_bank__wr_access_en =
 				comms_buffer[3];
-		pdev->VL53L1_PRM_00047.VL53L1_PRM_00319 =
+		pdev->dbg_results.power_management__go1_reset_status =
 				comms_buffer[4];
 
-		if ((pdev->VL53L1_PRM_00121.VL53L1_PRM_00286 & 0x01) == 0x01) {
+		if ((pdev->sys_ctrl.power_management__go1_power_force & 0x01) == 0x01) {
 
-				if (((pdev->VL53L1_PRM_00047.VL53L1_PRM_00315 & 0x1F) == 0x1F) &&
-					((pdev->VL53L1_PRM_00047.VL53L1_PRM_00316   & 0x1F) == 0x1F))
+				if (((pdev->dbg_results.interrupt_manager__enables & 0x1F) == 0x1F) &&
+					((pdev->dbg_results.interrupt_manager__clear   & 0x1F) == 0x1F))
 					*pready = 0x01;
 				else
 					*pready = 0x00;
@@ -168,7 +165,7 @@ VL53L1_Error VL53L1_FCTN_00216(
 
 
 
-			if ((pdev->VL53L1_PRM_00047.VL53L1_PRM_00319 & 0x01) == 0x00)
+			if ((pdev->dbg_results.power_management__go1_reset_status & 0x01) == 0x00)
 				*pready = 0x01;
 			else
 				*pready = 0x00;
@@ -180,3 +177,4 @@ VL53L1_Error VL53L1_FCTN_00216(
 
 	return status;
 }
+

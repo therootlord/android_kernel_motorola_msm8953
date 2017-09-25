@@ -2,7 +2,8 @@
 /*
 * Copyright (c) 2016, STMicroelectronics - All Rights Reserved
 *
-* This file is part of VL53L1 Core and is dual licensed, either 'STMicroelectronics Proprietary license'
+* This file is part of VL53L1 Core and is dual licensed, either 'STMicroelectronics
+* Proprietary license'
 * or 'BSD 3-clause "New" or "Revised" License' , at your option.
 *
 ********************************************************************************
@@ -11,7 +12,8 @@
 *
 ********************************************************************************
 *
-* License terms: STMicroelectronics Proprietary in accordance with licensing terms at www.st.com/sla0044
+* License terms: STMicroelectronics Proprietary in accordance with licensing
+* terms at www.st.com/sla0044
 *
 * STMicroelectronics confidential
 * Reproduction and Communication of this document is strictly prohibited unless
@@ -21,7 +23,8 @@
 ********************************************************************************
 *
 * Alternatively, VL53L1 Core may be distributed under the terms of
-* 'BSD 3-clause "New" or "Revised" License', in which case the following provisions apply instead of the ones
+* 'BSD 3-clause "New" or "Revised" License', in which case the following
+* provisions apply instead of the ones
 * mentioned above :
 *
 ********************************************************************************
@@ -177,17 +180,129 @@ typedef int8_t VL53L1_Error;
 #define VL53L1_ERROR_STREAM_COUNT_CHECK_FAIL           ((VL53L1_Error) - 18)
 
 
-#define VL53L1_ERROR_GPH_ID_CHECK_FAIL                ((VL53L1_Error) - 19)
+#define VL53L1_ERROR_GPH_ID_CHECK_FAIL                 ((VL53L1_Error) - 19)
 
 
-#define VL53L1_ERROR_ZONE_STREAM_COUNT_CHECK_FAIL     ((VL53L1_Error) - 20)
+#define VL53L1_ERROR_ZONE_STREAM_COUNT_CHECK_FAIL      ((VL53L1_Error) - 20)
 
 
-#define VL53L1_ERROR_ZONE_GPH_ID_CHECK_FAIL           ((VL53L1_Error) - 21)
+#define VL53L1_ERROR_ZONE_GPH_ID_CHECK_FAIL            ((VL53L1_Error) - 21)
 
 
 
-#define VL53L1_ERROR_NOT_IMPLEMENTED                   ((VL53L1_Error) - 22)
+#define VL53L1_ERROR_XTALK_EXTRACTION_NO_SAMPLE_FAIL   ((VL53L1_Error) - 22)
+
+
+
+
+
+#define VL53L1_ERROR_XTALK_EXTRACTION_SIGMA_LIMIT_FAIL ((VL53L1_Error) - 23)
+
+
+
+
+
+
+
+
+#define VL53L1_ERROR_OFFSET_CAL_NO_SAMPLE_FAIL           ((VL53L1_Error) - 24)
+
+
+
+#define VL53L1_ERROR_OFFSET_CAL_NO_SPADS_ENABLED_FAIL    ((VL53L1_Error) - 25)
+
+
+
+
+#define VL53L1_ERROR_ZONE_CAL_NO_SAMPLE_FAIL             ((VL53L1_Error) - 26)
+
+
+
+
+
+#define VL53L1_WARNING_REF_SPAD_CHAR_NOT_ENOUGH_SPADS   ((VL53L1_Error) - 27)
+
+
+#define VL53L1_WARNING_REF_SPAD_CHAR_RATE_TOO_HIGH      ((VL53L1_Error) - 28)
+
+
+
+
+#define VL53L1_WARNING_REF_SPAD_CHAR_RATE_TOO_LOW       ((VL53L1_Error) - 29)
+
+
+
+
+
+
+#define VL53L1_WARNING_OFFSET_CAL_MISSING_SAMPLES       ((VL53L1_Error) - 30)
+
+
+
+#define VL53L1_WARNING_OFFSET_CAL_SIGMA_TOO_HIGH        ((VL53L1_Error) - 31)
+
+
+
+
+#define VL53L1_WARNING_OFFSET_CAL_RATE_TOO_HIGH         ((VL53L1_Error) - 32)
+
+
+
+
+#define VL53L1_WARNING_OFFSET_CAL_SPAD_COUNT_TOO_LOW    ((VL53L1_Error) - 33)
+
+
+
+
+
+
+#define VL53L1_WARNING_ZONE_CAL_MISSING_SAMPLES       ((VL53L1_Error) - 34)
+
+
+
+#define VL53L1_WARNING_ZONE_CAL_SIGMA_TOO_HIGH        ((VL53L1_Error) - 35)
+
+
+
+
+#define VL53L1_WARNING_ZONE_CAL_RATE_TOO_HIGH         ((VL53L1_Error) - 36)
+
+
+
+
+
+
+#define VL53L1_WARNING_XTALK_MISSING_SAMPLES             ((VL53L1_Error) - 37)
+
+
+
+
+
+
+
+
+#define VL53L1_WARNING_XTALK_NO_SAMPLES_FOR_GRADIENT     ((VL53L1_Error) - 38)
+
+
+
+
+
+
+
+
+
+#define VL53L1_WARNING_XTALK_SIGMA_LIMIT_FOR_GRADIENT    ((VL53L1_Error) - 39)
+
+
+
+
+
+
+
+
+
+
+#define VL53L1_ERROR_NOT_IMPLEMENTED                   ((VL53L1_Error) - 40)
 
 
 
@@ -204,4 +319,5 @@ typedef int8_t VL53L1_Error;
 
 
 #endif
+
 

@@ -570,7 +570,13 @@ static ssize_t mdss_fb_get_panel_info(struct device *dev,
 			"min_w=%d\nmin_h=%d\nroi_merge=%d\ndyn_fps_en=%d\n"
 			"min_fps=%d\nmax_fps=%d\npanel_name=%s\n"
 			"primary_panel=%d\nis_pluggable=%d\ndisplay_id=%s\n"
-			"is_cec_supported=%d\nis_pingpong_split=%d\n",
+			"is_cec_supported=%d\nis_pingpong_split=%d\n"
+			"is_hdr_enabled=%d\n"
+			"peak_brightness=%d\nblackness_level=%d\n"
+			"white_chromaticity_x=%d\nwhite_chromaticity_y=%d\n"
+			"red_chromaticity_x=%d\nred_chromaticity_y=%d\n"
+			"green_chromaticity_x=%d\ngreen_chromaticity_y=%d\n"
+			"blue_chromaticity_x=%d\nblue_chromaticity_y=%d\n",
 			pinfo->partial_update_enabled,
 			pinfo->roi_alignment.xstart_pix_align,
 			pinfo->roi_alignment.width_pix_align,
@@ -582,7 +588,18 @@ static ssize_t mdss_fb_get_panel_info(struct device *dev,
 			pinfo->dynamic_fps, pinfo->min_fps, pinfo->max_fps,
 			pinfo->panel_name, pinfo->is_prim_panel,
 			pinfo->is_pluggable, pinfo->display_id,
-			pinfo->is_cec_supported, is_pingpong_split(mfd));
+			pinfo->is_cec_supported, is_pingpong_split(mfd),
+			pinfo->hdr_properties.hdr_enabled,
+			pinfo->hdr_properties.peak_brightness,
+			pinfo->hdr_properties.blackness_level,
+			pinfo->hdr_properties.display_primaries[0],
+			pinfo->hdr_properties.display_primaries[1],
+			pinfo->hdr_properties.display_primaries[2],
+			pinfo->hdr_properties.display_primaries[3],
+			pinfo->hdr_properties.display_primaries[4],
+			pinfo->hdr_properties.display_primaries[5],
+			pinfo->hdr_properties.display_primaries[6],
+			pinfo->hdr_properties.display_primaries[7]);
 
 	return ret;
 }
@@ -3018,16 +3035,19 @@ static int mdss_fb_release_all(struct fb_info *info, bool release_all)
 		event.info = info;
 		event.data = &blank;
 
-		fb_notifier_call_chain(FB_EARLY_EVENT_BLANK, &event);
+		if (mfd->index == 0)
+			fb_notifier_call_chain(FB_EARLY_EVENT_BLANK, &event);
 
 		ret = mdss_fb_blank_sub(FB_BLANK_POWERDOWN, info,
 			mfd->op_enable);
 		if (ret) {
-			fb_notifier_call_chain(FB_R_EARLY_EVENT_BLANK, &event);
+			if (mfd->index == 0)
+				fb_notifier_call_chain(FB_R_EARLY_EVENT_BLANK,
+					&event);
 			pr_err("can't turn off fb%d! rc=%d current process=%s pid=%d\n",
 			      mfd->index, ret, task->comm, current->tgid);
 			return ret;
-		} else
+		} else if (mfd->index == 0)
 			fb_notifier_call_chain(FB_EVENT_BLANK, &event);
 
 		if (mfd->fb_ion_handle)

@@ -1,7 +1,7 @@
 /*
 * Copyright (c) 2016, STMicroelectronics - All Rights Reserved
 *
-* License terms: BSD 3-clause "New" or "Revised" License.
+*License terms : BSD 3-clause "New" or "Revised" License.
 *
 * Redistribution and use in source and binary forms, with or without
 * modification, are permitted provided that the following conditions are met:
@@ -61,15 +61,11 @@
 #include "stmvl53l1_ipp.h"
 
 #include "stmvl53l1_if.h" /* our device interface to user space */
+#include "stmvl53l1_internal_if.h"
 
 /** @ingroup vl53l1_config
  * @{
  */
-/**
- * Configure max number of device the driver can support
- */
-#define STMVL53L1_CFG_MAX_DEV	1
-
 /**
  * default polling period delay in millisecond
  *
@@ -84,10 +80,25 @@
  *
  * Can be change at run time via @ref vl53l1_ioctl or @ref sysfs_attrib
  */
-#define STMVL53L1_CFG_TIMING_BUDGET_US	16000
+#define STMVL53L1_CFG_TIMING_BUDGET_US	33000
 
 /** default preset ranging mode */
 #define STMVL53L1_CFG_DEFAULT_MODE VL53L1_PRESETMODE_RANGING
+
+/** default distance mode */
+#define STMVL53L1_CFG_DEFAULT_DISTANCE_MODE	VL53L1_DISTANCEMODE_LONG
+
+/** default crosstalk enable */
+#define STMVL53L1_CFG_DEFAULT_CROSSTALK_ENABLE	1
+
+/** default crosstalk for autonomous mode */
+#define STMVL53L1_CFG_DEFAULT_CROSSTALK_AUTONOMOUS	1000
+
+/** max distance value mm */
+#define STMVL53L1_MAX_DISTANCE	0x1FFF
+
+/** default output mode */
+#define STMVL53L1_CFG_DEFAULT_OUTPUT_MODE	VL53L1_OUTPUTMODE_NEAREST
 
 /** @} */ /* ingroup vl53l1_config */
 
@@ -101,37 +112,10 @@
  * @note uses @a vl53l1_dbgmsg for output so make sure to enable debug
  * to get roi dump
  */
-#define STMVL53L1_CFG_ROI_DEBUG	1
-
-/**
- * enable Debug gpio signal (default off)
- *
- * gpio can trigger DSO and i2c sniffer on error or fatal issue
- *
- * Implementation on this module use two gpio valid for panda e/s
- * see @a STMVL53L1_CFG_DBG_IO_0 and @a STMVL53L1_CFG_DBG_IO_1
- *
- * @note you may need customize the gpio define on the 3 func/macro
- * init/set/fini to fit target platform specific
- */
-#define STMVL53L1_CFG_DBG_IO	0
-
-/** dbg i/o 0  gpio number
- * on panda es 37 can 't be privately acquire share with gpmc
- * but seam ok to use as output (only) w/o acquire
- */
-#define STMVL53L1_CFG_DBG_IO_0	37
-/** dbg i/o 1  gpio number
- *
- * on panda ES gpio 38 can 't be privately acquire share with gpmc ?
- * but seam ok to use as output (only) w/o acquire
- */
-#define STMVL53L1_CFG_DBG_IO_1	38
+#define STMVL53L1_CFG_ROI_DEBUG	0
 
 /** @} */ /* ingroup vl53l1_mod_dbg*/
 
-/* #define USE_INT */
-/* #define IRQ_NUM	   59 */
 /* #define DEBUG_TIME_LOG */
 
 
@@ -139,6 +123,8 @@
 struct timeval start_tv, stop_tv;
 #endif
 
+/* Set default value to 1 to allow to see module insertion debug messages */
+int stmvl53l1_enable_debug = 1;
 
 #define VL53L1_INPUT_DEVICE_NAME	"STM VL53L1 proximity sensor"
 
@@ -148,11 +134,20 @@ static int stmvl53l1_open(struct inode *inode, struct file *file);
 static int stmvl53l1_release(struct inode *inode, struct file *file);
 static int ctrl_start(struct stmvl53l1_data *data);
 static int ctrl_stop(struct stmvl53l1_data *data);
+static int ctrl_suspend(struct stmvl53l1_data *data);
 
+#ifdef CONFIG_COMPAT
+static long stmvl53l1_compat_ioctl(struct file *file,
+				unsigned int cmd, unsigned long arg);
+#endif
+static bool force_device_on_en_default = false;
+
+module_param(force_device_on_en_default, bool, 0444);
+MODULE_PARM_DESC(force_device_on_en_default,
+	"select whether force_device_on_en is true or false by default");
 /**
  *  module interface struct
  *  interface to platform speficic device handling , concern power/reset ...
- *  TODO not perfect :(
  */
 struct stmvl53l1_module_fn_t {
 	int (*init)(void);	/*!< init */
@@ -164,17 +159,21 @@ struct stmvl53l1_module_fn_t {
 	/**
 	 *  give device power
 	 * @param data  specific module storage ptr
-	 * @param preset [out] shall be set to 1 if device got unpowered or
-	 * reset,\n
-	 * keep unchanged if the the module is not capable to drive device power
-	 *  power
 	 * @return 0 on sucess
 	 */
-	int (*power_up)(void *data, unsigned int *preset);
+	int (*power_up)(void *data);
 	/**
 	 *  power down TOFO also stop intr
 	 */
-	int (*power_down)(void *);
+	int (*power_down)(void *data);
+	/*
+	 * release reset so device start.
+	 */
+	int (*reset_release)(void *data);
+	/*
+	 * put device under reset.
+	 */
+	int (*reset_hold)(void *data);
 
 	 /**
 	  * enable interrupt
@@ -191,25 +190,27 @@ struct stmvl53l1_module_fn_t {
 	int (*start_intr)(void *object, int *poll_mode);
 
 	void (*clean_up)(void); /*!< optional can be void */
+
+	/* increment reference counter */
+	void *(*get)(void *object);
+
+	/* decrement reference counter and deallocate memory when zero */
+	void (*put)(void *object);
 };
 
-#ifdef CAMERA_CCI
-	.init = stmvl53l1_init_cci,
-	.deinit = stmvl53l1_exit_cci,
-	.power_up = stmvl53l1_power_up_cci,
-	.power_down = stmvl53l1_power_down_cci,
-};
-#else
 /** i2c module interface*/
 static struct stmvl53l1_module_fn_t stmvl53l1_module_func_tbl = {
 	.init = stmvl53l1_init_i2c,
 	.deinit = stmvl53l1_exit_i2c,
 	.power_up = stmvl53l1_power_up_i2c,
 	.power_down = stmvl53l1_power_down_i2c,
+	.reset_release = stmvl53l1_reset_release_i2c,
+	.reset_hold = stmvl53l1_reset_hold_i2c,
 	.clean_up = stmvl53l1_clean_up_i2c,
 	.start_intr = stmvl53l1_start_intr,
+	.get = stmvl53l1_get,
+	.put = stmvl53l1_put,
 };
-#endif
 
 
 #ifndef MIN
@@ -227,14 +228,11 @@ static void stmvl53l1_input_push_data(struct stmvl53l1_data *data);
  * Global data
  */
 
-/* TODO review how the "id" is managed
- * now we statically inc  the value on each probe/setup but it could come from
+/* We statically inc the value on each probe/setup but it could come from
  * the i2c or platform data and/or device tree
  */
-/**
- * device in used (next device id)
- */
-static atomic_t dev_id;/* so that first add return = 0 */
+static DEFINE_MUTEX(dev_table_mutex);
+
 /**
  * in-used device LUT
  * we need this as the message reception from netlink message can't
@@ -249,11 +247,148 @@ struct stmvl53l1_data *stmvl53l1_dev_table[STMVL53L1_CFG_MAX_DEV];
 static const struct file_operations stmvl53l1_ranging_fops = {
 	.owner =		THIS_MODULE,
 	.unlocked_ioctl =	stmvl53l1_ioctl,
+#ifdef CONFIG_COMPAT
+	.compat_ioctl	=	stmvl53l1_compat_ioctl,
+#endif
 	.open =			stmvl53l1_open,
 	.release =		stmvl53l1_release,
 	/* .flush =		stmvl53l0_flush, */
 };
 
+static int store_last_error(struct stmvl53l1_data *data, int rc)
+{
+	data->last_error = rc;
+
+	return -EIO;
+}
+
+static int allocate_dev_id(void)
+{
+	int i;
+
+	mutex_lock(&dev_table_mutex);
+
+	for (i = 0; i < STMVL53L1_CFG_MAX_DEV; i++)
+		if (!stmvl53l1_dev_table[i])
+			break;
+	i = i < STMVL53L1_CFG_MAX_DEV ? i : -1;
+
+	mutex_unlock(&dev_table_mutex);
+
+	return i;
+}
+
+static void deallocate_dev_id(int id)
+{
+	mutex_lock(&dev_table_mutex);
+
+	stmvl53l1_dev_table[id] = NULL;
+
+	mutex_unlock(&dev_table_mutex);
+}
+
+/* helpers to manage reader list for blockint ioctl */
+/* call them with lock */
+static void empty_and_free_list(struct list_head *head)
+{
+	struct stmvl53l1_waiters *waiter;
+	struct stmvl53l1_waiters *tmp;
+
+	list_for_each_entry_safe(waiter, tmp, head, list) {
+		list_del(&waiter->list);
+		kfree(waiter);
+	}
+}
+
+static int add_reader(pid_t pid, struct list_head *head)
+{
+	struct stmvl53l1_waiters *new_waiter;
+
+	new_waiter = kmalloc(sizeof(struct stmvl53l1_waiters), GFP_KERNEL);
+	if (!new_waiter)
+		return -ENOMEM;
+	new_waiter->pid = pid;
+	list_add(&new_waiter->list, head);
+
+	return 0;
+}
+
+static bool is_pid_in_list(pid_t pid, struct list_head *head)
+{
+	struct stmvl53l1_waiters *waiter;
+
+	list_for_each_entry(waiter, head, list)
+		if (waiter->pid == pid)
+			return true;
+
+	return false;
+}
+
+static void wake_up_data_waiters(struct stmvl53l1_data *data)
+{
+	empty_and_free_list(&data->simple_data_reader_list);
+	empty_and_free_list(&data->mz_data_reader_list);
+	wake_up(&data->waiter_for_data);
+}
+
+static void stmvl53l1_insert_flush_events_lock(struct stmvl53l1_data *data)
+{
+	while (data->flush_todo_counter) {
+		data->flushCount++;
+		input_report_abs(data->input_dev_ps, ABS_GAS, data->flushCount);
+		input_sync(data->input_dev_ps);
+		vl53l1_dbgmsg("Sensor HAL Flush Count = %u\n",
+			data->flushCount);
+		data->flush_todo_counter--;
+	}
+}
+
+static int reset_release(struct stmvl53l1_data *data)
+{
+	int rc;
+
+	if (!data->reset_state)
+		return 0;
+
+	vl53l1_dbgmsg("turn on vdd\n");
+	rc = stmvl53l1_module_func_tbl.power_up(data->client_object);
+	if (rc) {
+		vl53l1_errmsg("%d,error rc %d\n", __LINE__, rc);
+		return rc;
+	}
+
+	rc = stmvl53l1_module_func_tbl.reset_release(data->client_object);
+	if (rc)
+		vl53l1_errmsg("reset release fail rc=%d\n", rc);
+	else
+		data->reset_state = 0;
+
+	return rc;
+}
+
+static int reset_hold(struct stmvl53l1_data *data)
+{
+	int rc;
+
+	if (data->reset_state)
+		return 0;
+
+	if (data->force_device_on_en)
+		return 0;
+
+	rc = stmvl53l1_module_func_tbl.reset_hold(data->client_object);
+	if (!rc)
+		data->reset_state = 1;
+
+	vl53l1_dbgmsg("turn off vdd\n");
+	rc = stmvl53l1_module_func_tbl.power_down(data->client_object);
+	if (rc) {
+		vl53l1_errmsg("%d,error rc %d\n", __LINE__, rc);
+		return rc;
+	}
+
+	return rc;
+}
 
 #ifdef DEBUG_TIME_LOG
 static void stmvl53l0_DebugTimeGet(struct timeval *ptv)
@@ -278,41 +413,6 @@ long stmvl53l1_tv_dif(struct timeval *pstart_tv, struct timeval *pstop_tv)
 
 	return total_sec*1000000+total_usec;
 }
-
-#if STMVL53L1_CFG_DBG_IO
-int stmvl53l1_dbg_init(struct stmvl53l1_data *data)
-{
-	/* Normally we shall acquired the gpio */
-	gpio_direction_output(STMVL53L1_CFG_DBG_IO_0, 0);
-	gpio_direction_output(STMVL53L1_CFG_DBG_IO_1, 0);
-
-	return 0;
-}
-
-static void stmvl53l1_dbg_fini(struct stmvl53l1_data *data)
-{
-	/* gpio_free(STMVL53L1_CFG_DBG_IO_0); */
-	/* gpio_free(STMVL53L1_CFG_DBG_IO_1); */
-}
-
-static void stmvl53l1_dbg_gpio(struct stmvl53l1_data *data,
-	int gpio_no, int value){
-	switch (gpio_no) {
-	case 0:
-		gpio_set_value(STMVL53L1_CFG_DBG_IO_0, value);
-		break;
-	case 1:
-		gpio_set_value(STMVL53L1_CFG_DBG_IO_1, value);
-		break;
-	}
-}
-#else
-#	define	stmvl53l1_dbg_init(...) 0
-		/* call must check return or it will cc warn/error */
-#	define	stmvl53l1_dbg_fini(...) (void)0
-#	define	stmvl53l1_dbg_gpio(...) (void)0
-#endif
-
 
 #if STMVL53L1_CFG_ROI_DEBUG
 static void dump_roi(VL53L1_UserRoi_t *rois, uint32_t n)
@@ -351,52 +451,45 @@ static void kill_mz_data(VL53L1_MultiRangingData_t *pdata)
 	pdata->RoiStatus = VL53L1_ROISTATUS_NOT_VALID;
 }
 
+static void stmvl53l1_setup_auto_config(struct stmvl53l1_data *data)
+{
+	/* default config is detect object below 300mm with 1s period */
+	data->auto_pollingTimeInMs = 1000;
+	data->auto_config.DetectionMode = VL53L1_DETECTION_DISTANCE_ONLY;
+	data->auto_config.IntrNoTarget = 0;
+	data->auto_config.Distance.CrossMode = VL53L1_THRESHOLD_CROSSED_LOW;
+	data->auto_config.Distance.High = 1000;
+	data->auto_config.Distance.Low = 300;
+	data->auto_config.Rate.CrossMode = VL53L1_THRESHOLD_CROSSED_LOW;
+	data->auto_config.Rate.High = 0;
+	data->auto_config.Rate.Low = 0;
+}
+
 /**
   * start sensor
   *
   * @warning must be used if only stopped
   * @param data device data
   * @return 0 on sucess
-  * TODO do we need extra args such as mode etc
   */
 static int stmvl53l1_start(struct stmvl53l1_data *data)
 {
 	int rc;
-	uint8_t ref_spad_cnt = 0;
-	uint8_t ref_spad_loc = 0;
+	VL53L1_CalibrationData_t cali;
 
-	/* TODO wait on previous aborted/stoped ipp and or flush to completed */
-	rc = stmvl53l1_module_func_tbl.power_up(data->client_object,
-		&data->reset);
-	if (rc) {
-		vl53l1_errmsg("power up fail @%d rc=%d\n", __LINE__, rc);
+	data->is_first_irq = true;
+	data->is_data_valid = false;
+
+	rc = reset_release(data);
+	if (rc)
 		goto done;
-	}
+
 	/* full setup when out of reset or power up */
-	if (data->reset) {
-		vl53l1_dbgmsg("data init\n");
-		rc = VL53L1_DataInit(&data->stdev);
-		if (rc) {
-			vl53l1_errmsg("VL53L1_DataInit @%d fail %d\n",
-					__LINE__, rc);
-			goto done;
-		}
-
-	}
-
 	rc = VL53L1_StaticInit(&data->stdev);
 	if (rc) {
 		vl53l1_errmsg("VL53L1_StaticInit @%d fail %d\n",
 				__LINE__, rc);
-		goto done;
-	}
-
-	/* TODO can it be optimized if we already have done it already? */
-	rc = VL53L1_PerformRefSpadManagement(&data->stdev,
-			&ref_spad_cnt, &ref_spad_loc);
-	if (rc) {
-		vl53l1_errmsg("VL53L1_PerformRefSpadManagement @%d fail %d\n",
-			__LINE__, rc);
+		rc = store_last_error(data, rc);
 		goto done;
 	}
 
@@ -405,25 +498,59 @@ static int stmvl53l1_start(struct stmvl53l1_data *data)
 	if (rc) {
 		vl53l1_errmsg("VL53L1_SetPresetMode %d fail %d",
 				data->preset_mode, rc);
+		rc = store_last_error(data, rc);
 		goto done;
 	}
 
-	/* aplly timing budget */
+	if (data->preset_mode == VL53L1_PRESETMODE_AUTONOMOUS) {
+		/* disable xtalk and set short distance mode
+		 * for autonomous mode */
+		data->crosstalk_enable = 0;
+		data->distance_mode = VL53L1_DISTANCEMODE_SHORT;
+	} else {
+		/* restore xtalk and distance mode to default
+		 * values for non-autonomous mode */
+		data->crosstalk_enable =
+			STMVL53L1_CFG_DEFAULT_CROSSTALK_ENABLE;
+		data->distance_mode =
+			STMVL53L1_CFG_DEFAULT_DISTANCE_MODE;
+	}
+
+	rc = VL53L1_SetXTalkCompensationEnable(&data->stdev,
+		data->crosstalk_enable);
+	if (rc) {
+		vl53l1_errmsg("VL53L1_SetXTalkCompensationEnable %d fail %d",
+				data->crosstalk_enable, rc);
+		rc = store_last_error(data, rc);
+		goto done;
+	}
+
+	/* apply distance mode only in lite and standard ranging */
+	rc = VL53L1_SetDistanceMode(&data->stdev, data->distance_mode);
+	if (rc) {
+		vl53l1_errmsg("VL53L1_SetDistanceMode %d fail %d",
+			data->distance_mode, rc);
+		rc = store_last_error(data, rc);
+		goto done;
+	}
+
+	/* apply timing budget */
 	rc = VL53L1_SetMeasurementTimingBudgetMicroSeconds(&data->stdev,
 			data->timing_budget);
 	if (rc) {
 		vl53l1_errmsg("SetTimingBudget %d fail %d",
 				data->timing_budget, rc);
+		rc = store_last_error(data, rc);
 		goto done;
 	}
 	vl53l1_dbgmsg("timing budget @%d\n", data->timing_budget);
 
 	/* aplly roi if any set */
 	if (data->roi_cfg.NumberOfRoi) {
-		/* TODO check for each mode we have req number of roi */
 		rc = VL53L1_SetROI(&data->stdev, &data->roi_cfg);
 		if (rc) {
 			vl53l1_errmsg("VL53L1_SetROI fail %d\n", rc);
+			rc = store_last_error(data, rc);
 			goto done;
 		}
 		vl53l1_dbgmsg("#%d custom ROI set status\n",
@@ -432,44 +559,92 @@ static int stmvl53l1_start(struct stmvl53l1_data *data)
 		vl53l1_dbgmsg("using default ROI\n");
 	}
 
-	/* if working in interrupt ask intr to enable and hook the handler */
-
-	/* TODO see how we best manage force poll mode
-	 * set this base on 2nd var  + real interrupt presence use
-	 */
-	data->poll_mode = 0;
-	rc = stmvl53l1_module_func_tbl.start_intr(data->client_object,
-		&data->poll_mode);
-	if (rc < 0) {
-		vl53l1_errmsg("can't start no  intr\n");
-		goto done;
-	}
-
 	/* init the timing  */
 	do_gettimeofday(&data->start_tv);
 	data->meas.start_tv = data->start_tv;
-	/* init the ranging data => kill the previous ranging mz data
-	 * TODO kill simple data also if not same
-	 */
+	/* init the ranging data => kill the previous ranging mz data */
 	kill_mz_data(&data->meas.multi_range_data);
 
+	memset(&cali, 0, sizeof(cali));
+	rc = VL53L1_GetCalibrationData(&data->stdev, &cali);
+	if (rc) {
+		vl53l1_errmsg("VL53L1_GetCalibrationData fail\n");
+		rc = store_last_error(data, rc);
+		goto done;
+	}
+
+	/* set autonomous mode configuration */
+	if (data->preset_mode == VL53L1_PRESETMODE_AUTONOMOUS) {
+		if (data->cam_mode == 0) {
+			rc = VL53L1_SetInterMeasurementPeriodMilliSeconds(
+					&data->stdev,
+					data->auto_pollingTimeInMs);
+			if (rc) {
+				vl53l1_errmsg("Fail to set auto period %d\n",
+						rc);
+				rc = store_last_error(data, rc);
+				goto done;
+			}
+			rc = VL53L1_SetThresholdConfig(&data->stdev,
+					&data->auto_config);
+			if (rc) {
+				vl53l1_errmsg("Fail to set auto config %d\n",
+						rc);
+				rc = store_last_error(data, rc);
+				goto done;
+			}
+		} else {
+			/* set camera autonomous configration */
+			rc = VL53L1_SetInterMeasurementPeriodMilliSeconds(
+					&data->stdev,
+					data->auto_pollingTimeInMs_cam);
+			if (rc) {
+				vl53l1_errmsg("Fail to set auto period %d\n",
+						rc);
+				rc = store_last_error(data, rc);
+				goto done;
+			}
+			rc = VL53L1_SetThresholdConfig(&data->stdev,
+					&data->auto_config_cam);
+			if (rc) {
+				vl53l1_errmsg("Fail to set auto config %d\n",
+						rc);
+				rc = store_last_error(data, rc);
+				goto done;
+			}
+		}
+		cali.customer.algo__crosstalk_compensation_plane_offset_kcps
+			= STMVL53L1_CFG_DEFAULT_CROSSTALK_AUTONOMOUS;
+	} else {
+		cali.customer.algo__crosstalk_compensation_plane_offset_kcps
+			= data->xtalk_offset;
+	}
+
+	rc = VL53L1_SetCalibrationData(&data->stdev, &cali);
+	if (rc) {
+		vl53l1_errmsg("VL53L1_SetCalibrationData fail\n");
+		rc = store_last_error(data, rc);
+		goto done;
+	}
+
+	data->allow_hidden_start_stop =
+		(data->distance_mode == VL53L1_DISTANCEMODE_AUTO ||
+		data->distance_mode == VL53L1_DISTANCEMODE_AUTO_LITE);
 	/* kick off ranging */
 	rc = VL53L1_StartMeasurement(&data->stdev);
 	if (rc) {
 		vl53l1_errmsg("VL53L1_StartMeasurement @%d fail %d",
 				__LINE__, rc);
+		rc = store_last_error(data, rc);
 		goto done;
 	}
 
-	data->reset = 0;
 	data->meas.cnt = 0;
 	data->meas.err_cnt = 0;
 	data->meas.err_tot = 0;
 	data->meas.poll_cnt = 0;
 	data->meas.intr = 0;
 	data->enable_sensor = 1;
-	stmvl53l1_dbg_gpio(data, 0, 0);
-	stmvl53l1_dbg_gpio(data, 0, 0);
 	if (data->poll_mode) {
 		/* kick off the periodical polling work */
 		schedule_delayed_work(&data->dwork,
@@ -493,38 +668,74 @@ static int stmvl53l1_stop(struct stmvl53l1_data *data)
 	if (rc) {
 		vl53l1_errmsg("VL53L1_StopMeasurement @%d fail %d",
 				__LINE__, rc);
-		/* FIXME what to do it fail ? are we stopped or not */
-		/* goto done; */
+		rc = store_last_error(data, rc);
 	}
-	/* do we power off sensor always */
+	/* put device under reset */
 	/* do we ask explicit intr stop or just use stop */
-	stmvl53l1_module_func_tbl.power_down(data->client_object);
+	reset_hold(data);
 
 	data->enable_sensor = 0;
+	data->timing_budget = STMVL53L1_CFG_TIMING_BUDGET_US;
 	if (data->poll_mode) {
 		/* cancel periodical polling work */
 		cancel_delayed_work(&data->dwork);
-		/* if we are in ipp waiting mode then abort it */
-		stmvl53l1_ipp_stop(data);
 	}
+
+	/* if we are in ipp waiting mode then abort it */
+	stmvl53l1_ipp_stop(data);
+	/* wake up all waiters */
+	/* they will receive -ENODEV error */
+	wake_up_data_waiters(data);
+
 	return rc;
 }
 
-
-#ifdef USE_INT
-static irqreturn_t stmvl53l1_interrupt_handler(int vec, void *info)
+static int activate_sar_mode(struct stmvl53l1_data *data)
 {
+	int rc = VL53L1_ERROR_NONE;
 
-	struct stmvl53l1_data *data = (struct stmvl53l1_data *)info;
+	if (data == NULL)
+		return -EFAULT;
 
-	if (data->irq == vec) {
-		data->interrupt_received = 1;
-		schedule_delayed_work(&data->dwork, 0);
-	}
-	return IRQ_HANDLED;
+	if (data->enable_sensor == 0 &&
+		!data->is_calibrating &&
+		data->sar_mode == 1 &&
+		data->cam_mode != 1) {
+		data->preset_mode = VL53L1_PRESETMODE_AUTONOMOUS;
+		rc = stmvl53l1_start(data);
+		if (rc == VL53L1_ERROR_NONE)
+			vl53l1_info("sensor in sar mode!\n");
+		else
+			vl53l1_errmsg("fail to active sar err %d\n", rc);
+	} else
+		vl53l1_info("skip sar activation\n");
+
+	return rc;
 }
-#endif
 
+static int deactivate_sar_mode(struct stmvl53l1_data *data)
+{
+	int rc = VL53L1_ERROR_NONE;
+
+	if (data == NULL)
+		return -EFAULT;
+
+	if (data->enable_sensor == 1 &&
+		!data->is_calibrating &&
+		data->preset_mode == VL53L1_PRESETMODE_AUTONOMOUS &&
+		data->cam_mode != 1) {
+		rc = stmvl53l1_stop(data);
+		if (rc == VL53L1_ERROR_NONE) {
+			vl53l1_info("sensor is out of sar mode!\n");
+			/* set preset mode back to default ranging mode */
+			data->preset_mode = VL53L1_PRESETMODE_RANGING;
+		} else
+			vl53l1_errmsg("fail to deactivate sar err %d\n", rc);
+	} else
+		vl53l1_info("sar is not actived, skip deactivation\n");
+
+	return rc;
+}
 
 /*
  * SysFS support
@@ -554,19 +765,10 @@ static ssize_t stmvl53l1_store_enable_ps_sensor(struct device *dev,
 	vl53l1_dbgmsg("enable_sensor is %d => %d\n",
 		data->enable_sensor, (int)val);
 
-	if (val == 1) {
-		/* turn on sensor */
-		rc = ctrl_start(data);
-		if (rc)
-			count = -EINVAL;
-	} else {
-		/* turn off sensor */
-		rc = ctrl_stop(data);
-		if (rc)
-			count = -EINVAL;
-	}
+	rc = val == 1 ? ctrl_start(data) : ctrl_stop(data);
 	vl53l1_dbgmsg("End\n");
-	return count;
+
+	return rc ? rc : count;
 }
 
 /**
@@ -586,12 +788,24 @@ static DEVICE_ATTR(enable_ps_sensor, 0664/*S_IWUGO | S_IRUGO*/,
 		stmvl53l1_show_enable_ps_sensor,
 		stmvl53l1_store_enable_ps_sensor);
 
+static int stmvl53l1_set_poll_delay_ms(struct stmvl53l1_data *data, int delay)
+{
+	int rc = 0;
+
+	if (delay <= 0)
+		rc = -EINVAL;
+	else
+		data->poll_delay_ms = delay;
+
+	return rc;
+}
+
 static ssize_t stmvl53l1_show_poll_delay_ms(struct device *dev,
 				struct device_attribute *attr, char *buf)
 {
 	struct stmvl53l1_data *data = dev_get_drvdata(dev);
 
-	return snprintf(buf, 5, "%d\n", data->poll_delay_ms);
+	return scnprintf(buf, PAGE_SIZE, "%d\n", data->poll_delay_ms);
 }
 
 /* for work handler scheduler time */
@@ -601,22 +815,19 @@ static ssize_t stmvl53l1_store_poll_delay_ms(struct device *dev,
 {
 	struct stmvl53l1_data *data = dev_get_drvdata(dev);
 	int rc;
-	unsigned long delay_ms;
+	int delay;
 
-	rc = kstrtoul(buf, 10, &delay_ms);
-	if (rc) {
-		vl53l1_errmsg("poll delay syntax in %s\n", buf);
-		return -EINVAL;
-	}
-	if (delay_ms == 0) {
-		vl53l1_errmsg("invalid delay_ms=%ld\n", delay_ms);
-		return count;
-	}
 	mutex_lock(&data->work_mutex);
-	data->poll_delay_ms = delay_ms;
+
+	if (kstrtoint(buf, 0, &delay)) {
+		vl53l1_errmsg("invalid syntax in %s", buf);
+		rc = -EINVAL;
+	} else
+		rc = stmvl53l1_set_poll_delay_ms(data, delay);
+
 	mutex_unlock(&data->work_mutex);
 
-	return count;
+	return rc ? rc : count;
 }
 
 /**
@@ -635,8 +846,28 @@ static DEVICE_ATTR(set_delay_ms, 0660/*S_IWUGO | S_IRUGO*/,
 				stmvl53l1_show_poll_delay_ms,
 				stmvl53l1_store_poll_delay_ms);
 
-
 /* Timing Budget */
+static int stmvl53l1_set_timing_budget(struct stmvl53l1_data *data, int timing)
+{
+	int rc = 0;
+
+	if (timing <= 0) {
+		vl53l1_errmsg("invalid timing valid %d\n", timing);
+		rc = -EINVAL;
+	} else if (data->enable_sensor) {
+		rc = VL53L1_SetMeasurementTimingBudgetMicroSeconds(&data->stdev,
+			timing);
+		if (rc) {
+			vl53l1_errmsg("SetTimingBudget %d fail %d", timing, rc);
+			rc = store_last_error(data, rc);
+		} else
+			data->timing_budget = timing;
+	} else
+		data->timing_budget = timing;
+
+	return rc;
+}
+
 static ssize_t stmvl53l1_show_timing_budget(struct device *dev,
 				struct device_attribute *attr, char *buf)
 {
@@ -644,7 +875,9 @@ static ssize_t stmvl53l1_show_timing_budget(struct device *dev,
 	struct stmvl53l1_data *data = dev_get_drvdata(dev);
 
 	mutex_lock(&data->work_mutex);
-	n = snprintf(buf, 10, "%d\n", data->timing_budget);
+
+	n = scnprintf(buf, PAGE_SIZE, "%d\n", data->timing_budget);
+
 	mutex_unlock(&data->work_mutex);
 
 	return n;
@@ -656,39 +889,25 @@ static ssize_t stmvl53l1_store_timing_budget(struct device *dev,
 {
 	struct stmvl53l1_data *data = dev_get_drvdata(dev);
 	int rc;
-	unsigned long timing = 0;
-
-	rc = kstrtoul(buf, 10, &timing);
-	if (rc) {
-		vl53l1_errmsg("syntax timing in %s\n", buf);
-		return -EINVAL;
-	}
-	/* TODO shall we check for max or 0 here ? */
-	if (timing <= 0) {
-		vl53l1_errmsg("invalid timing valid %lu\n", timing);
-		return -EINVAL;
-	}
+	int timing;
 
 	mutex_lock(&data->work_mutex);
-	if (data->enable_sensor) {
-		vl53l1_errmsg("can set timing budget while ranging\n");
-		count = -EBUSY;
-	} else {
-		data->timing_budget = timing;
-		vl53l1_dbgmsg("timing budget set to %d\n",
-				(int)data->timing_budget);
-	}
+
+	if (kstrtoint(buf, 0, &timing)) {
+		vl53l1_errmsg("invalid syntax in %s", buf);
+		rc = -EINVAL;
+	} else
+		rc = stmvl53l1_set_timing_budget(data, timing);
+
 	mutex_unlock(&data->work_mutex);
 
-	return count;
+	return rc ? rc : count;
 }
 
 /**
  * sysfs "timing_budget"  [rd/wr]
  *
  *  set or get the ranging timing budget in microsecond
- *
- *  @note lowest value TBD/TODO
  *
  *  @warning can only be set while not ranging , trying to set it while ranging
  *  is an error (EBUSY)
@@ -829,6 +1048,31 @@ static DEVICE_ATTR(roi, 0660/*S_IWUGO | S_IRUGO*/,
 				stmvl53l1_store_roi);
 
 
+static int stmvl53l1_set_mode(struct stmvl53l1_data *data, int mode)
+{
+	int rc = 0;
+
+	if (data->enable_sensor) {
+		vl53l1_errmsg("can't change mode while ranging\n");
+		rc = -EBUSY;
+	} else {
+		switch (mode) {
+		case VL53L1_PRESETMODE_RANGING:
+		case VL53L1_PRESETMODE_MULTIZONES_SCANNING:
+		case VL53L1_PRESETMODE_LITE_RANGING:
+		case VL53L1_PRESETMODE_AUTONOMOUS:
+			data->preset_mode = mode;
+			break;
+		default:
+			vl53l1_errmsg("invalid mode %d\n", mode);
+			rc = -EINVAL;
+			break;
+		}
+	}
+
+	return rc;
+}
+
 static ssize_t stmvl53l1_show_mode(struct device *dev,
 				struct device_attribute *attr, char *buf)
 {
@@ -843,41 +1087,19 @@ static ssize_t stmvl53l1_store_mode(struct device *dev,
 {
 	struct stmvl53l1_data *data = dev_get_drvdata(dev);
 	int rc;
-	int mode, n;
+	int mode;
 
 	mutex_lock(&data->work_mutex);
-	if (data->enable_sensor) {
-		vl53l1_errmsg("can't change mode while ranging\n");
-		rc = -EBUSY;
-	} else {
-		n = sscanf(buf, "%d", &mode);
-		if (n != 1) {
-			vl53l1_errmsg("invalid syntax in %s", buf);
-			rc = -EINVAL;
-			goto done;
-		}
-		switch (mode) {
-		case VL53L1_PRESETMODE_RANGING:
-		case VL53L1_PRESETMODE_MULTIZONES_SCANNING:
-		case VL53L1_PRESETMODE_LITE_RANGING:
-			data->preset_mode = mode;
-			rc = count;
-			break;
 
-		case VL53L1_PRESETMODE_AUTONOMOUS:
-			vl53l1_errmsg("VL53L1_PRESETMODE_AUTONOMOUS not yet \
-				implemented");
-			rc = -EINVAL;
-			break;
-		default:
-			vl53l1_errmsg("invalid mode %d\n", mode);
-			rc = -EINVAL;
-			break;
-		}
-	}
-done:
+	if (kstrtoint(buf, 0, &mode)) {
+		vl53l1_errmsg("invalid syntax in %s", buf);
+		rc = -EINVAL;
+	} else
+		rc = stmvl53l1_set_mode(data, mode);
+
 	mutex_unlock(&data->work_mutex);
-	return rc;
+
+	return rc ? rc : count;
 }
 
 /**
@@ -895,45 +1117,671 @@ static DEVICE_ATTR(mode, 0660/*S_IWUGO | S_IRUGO*/,
 				stmvl53l1_show_mode,
 				stmvl53l1_store_mode);
 
-static ssize_t stmvl53l1_do_flush(struct device *dev,
-	struct device_attribute *attr, const char *buf, size_t count) {
+static int stmvl53l1_set_distance_mode(struct stmvl53l1_data *data,
+	int distance_mode)
+{
+	int rc = 0;
+
+	if (data->enable_sensor) {
+		vl53l1_errmsg("can't change distance mode while ranging\n");
+		rc = -EBUSY;
+	} else {
+		switch (distance_mode) {
+		case VL53L1_DISTANCEMODE_SHORT:
+		case VL53L1_DISTANCEMODE_MEDIUM:
+		case VL53L1_DISTANCEMODE_LONG:
+		case VL53L1_DISTANCEMODE_AUTO_LITE:
+		case VL53L1_DISTANCEMODE_AUTO:
+			data->distance_mode = distance_mode;
+			break;
+		default:
+			vl53l1_errmsg("invalid distance mode %d\n",
+				distance_mode);
+			rc = -EINVAL;
+			break;
+		}
+	}
+
+	return rc;
+}
+
+static ssize_t stmvl53l1_show_distance_mode(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
 	struct stmvl53l1_data *data = dev_get_drvdata(dev);
-	bool res;
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", data->distance_mode);
+}
+
+static ssize_t stmvl53l1_store_distance_mode(struct device *dev,
+					struct device_attribute *attr,
+					const char *buf, size_t count)
+{
+	struct stmvl53l1_data *data = dev_get_drvdata(dev);
+	int rc;
+	int distance_mode;
 
 	mutex_lock(&data->work_mutex);
 
-	vl53l1_dbgmsg("Schedule work to fire in 1ms (%ld)\n", jiffies);
-	res = schedule_delayed_work(&data->flush_work, msecs_to_jiffies(1));
+	if (kstrtoint(buf, 0, &distance_mode)) {
+		vl53l1_errmsg("invalid syntax in %s", buf);
+		rc = -EINVAL;
+	} else
+		rc = stmvl53l1_set_distance_mode(data, distance_mode);
 
 	mutex_unlock(&data->work_mutex);
 
-	return res ? count : -EBUSY;
+	return rc ? rc : count;
+}
+
+/**
+ * sysfs attribute " distance mode" [rd/wr]
+ *
+ * set the distance mode value can only be used while: not ranging
+ * @li 1 @a VL53L1_DISTANCEMODE_SHORT
+ * @li 2 @a VL53L1_DISTANCEMODE_MEDIUM
+ * @li 3 @a VL53L1_DISTANCEMODE_LONG
+ * @li 4 @a VL53L1_DISTANCEMODE_AUTO_LITE
+ * @li 5 @a VL53L1_DISTANCEMODE_AUTO
+ *
+ * @ingroup sysfs_attrib
+ */
+static DEVICE_ATTR(distance_mode, 0660/*S_IWUGO | S_IRUGO*/,
+				stmvl53l1_show_distance_mode,
+				stmvl53l1_store_distance_mode);
+
+static int stmvl53l1_set_crosstalk_enable(struct stmvl53l1_data *data,
+	int crosstalk_enable)
+{
+	int rc = 0;
+
+	if (data->enable_sensor) {
+		vl53l1_errmsg("can't change crosstalk enable while ranging\n");
+		rc = -EBUSY;
+	} else if (crosstalk_enable == 0 || crosstalk_enable == 1) {
+		data->crosstalk_enable = crosstalk_enable;
+	} else {
+		vl53l1_errmsg("invalid crosstalk enable %d\n",
+			crosstalk_enable);
+		rc = -EINVAL;
+	}
+
+	return rc;
+}
+
+static ssize_t stmvl53l1_show_crosstalk_enable(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	struct stmvl53l1_data *data = dev_get_drvdata(dev);
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", data->crosstalk_enable);
+}
+
+static ssize_t stmvl53l1_store_crosstalk_enable(struct device *dev,
+					struct device_attribute *attr,
+					const char *buf, size_t count)
+{
+	struct stmvl53l1_data *data = dev_get_drvdata(dev);
+	int rc;
+	int crosstalk_enable;
+
+	mutex_lock(&data->work_mutex);
+	if (kstrtoint(buf, 0, &crosstalk_enable)) {
+		vl53l1_errmsg("invalid syntax in %s", buf);
+		rc = -EINVAL;
+	} else
+		rc = stmvl53l1_set_crosstalk_enable(data, crosstalk_enable);
+
+	mutex_unlock(&data->work_mutex);
+
+	return rc ? rc : count;
+}
+
+/**
+ * sysfs attribute " crosstalk enable" [rd/wr]
+ *
+ * control if crosstalk compensation is eanble or not
+ * @li 0 disable crosstalk compensation
+ * @li 1 enable crosstalk compensation
+ *
+ * @ingroup sysfs_attrib
+ */
+static DEVICE_ATTR(crosstalk_enable, 0660/*S_IWUGO | S_IRUGO*/,
+				stmvl53l1_show_crosstalk_enable,
+				stmvl53l1_store_crosstalk_enable);
+
+static int stmvl53l1_set_output_mode(struct stmvl53l1_data *data,
+	int output_mode)
+{
+	int rc = 0;
+
+	if (data->enable_sensor) {
+		vl53l1_errmsg("can't change output mode while ranging\n");
+		rc = -EBUSY;
+	} else {
+		switch (output_mode) {
+		case VL53L1_OUTPUTMODE_NEAREST:
+		case VL53L1_OUTPUTMODE_STRONGEST:
+			data->output_mode = output_mode;
+			break;
+		default:
+			vl53l1_errmsg("invalid output mode %d\n", output_mode);
+			rc = -EINVAL;
+			break;
+		}
+	}
+
+	return rc;
+}
+
+static ssize_t stmvl53l1_show_output_mode(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	struct stmvl53l1_data *data = dev_get_drvdata(dev);
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", data->output_mode);
+}
+
+static ssize_t stmvl53l1_store_output_mode(struct device *dev,
+					struct device_attribute *attr,
+					const char *buf, size_t count)
+{
+	struct stmvl53l1_data *data = dev_get_drvdata(dev);
+	int rc;
+	int output_mode;
+
+	mutex_lock(&data->work_mutex);
+
+	if (kstrtoint(buf, 0, &output_mode)) {
+		vl53l1_errmsg("invalid syntax in %s", buf);
+		rc = -EINVAL;
+	} else
+		rc = stmvl53l1_set_output_mode(data, output_mode);
+
+	mutex_unlock(&data->work_mutex);
+
+	return rc ? rc : count;
+}
+
+/**
+ * sysfs attribute " output mode" [rd/wr]
+ *
+ * set the output mode value can only be used while: not ranging
+ * @li 1 @a VL53L1_OUTPUTMODE_NEAREST
+ * @li 2 @a VL53L1_OUTPUTMODE_STRONGEST
+ *
+ * @ingroup sysfs_attrib
+ */
+static DEVICE_ATTR(output_mode, 0660/*S_IWUGO | S_IRUGO*/,
+				stmvl53l1_show_output_mode,
+				stmvl53l1_store_output_mode);
+
+
+static int stmvl53l1_set_force_device_on_en(struct stmvl53l1_data *data,
+	int force_device_on_en)
+{
+	int rc;
+
+	if (force_device_on_en != 0 && force_device_on_en != 1) {
+		vl53l1_errmsg("invalid force_device_on_en mode %d\n",
+			force_device_on_en);
+		return -EINVAL;
+	}
+
+	data->force_device_on_en = force_device_on_en;
+
+	/* don't update reset if sensor is enable */
+	if (data->enable_sensor)
+		return 0;
+
+	/* ok update reset according force_device_on_en value */
+	if (force_device_on_en)
+		rc = reset_release(data);
+	else
+		rc = reset_hold(data);
+
+	return rc;
+}
+
+static ssize_t stmvl53l1_show_force_device_on_en(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	struct stmvl53l1_data *data = dev_get_drvdata(dev);
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", data->force_device_on_en);
+}
+
+static ssize_t stmvl53l1_store_force_device_on_en(struct device *dev,
+					struct device_attribute *attr,
+					const char *buf, size_t count)
+{
+	struct stmvl53l1_data *data = dev_get_drvdata(dev);
+	int rc;
+	int force_device_on_en;
+
+	mutex_lock(&data->work_mutex);
+
+	if (kstrtoint(buf, 0, &force_device_on_en)) {
+		vl53l1_errmsg("invalid syntax in %s", buf);
+		rc = -EINVAL;
+	} else
+		rc = stmvl53l1_set_force_device_on_en(data, force_device_on_en);
+
+	mutex_unlock(&data->work_mutex);
+
+	return rc ? rc : count;
+}
+
+/**
+ * sysfs attribute " force_device_on_enable" [rd/wr]
+ *
+ * Control if device is put under reset when stopped.
+ * @li 0 feature is disable. Device is put under reset when stopped.
+ * @li 1 feature is enable. Device is not put under reset when stopped.
+ *
+ * @ingroup sysfs_attrib
+ */
+static DEVICE_ATTR(force_device_on_enable, 0660/*S_IWUGO | S_IRUGO*/,
+				stmvl53l1_show_force_device_on_en,
+				stmvl53l1_store_force_device_on_en);
+
+static ssize_t stmvl53l1_do_flush(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t count) {
+	struct stmvl53l1_data *data = dev_get_drvdata(dev);
+
+	mutex_lock(&data->work_mutex);
+
+	data->flush_todo_counter++;
+	stmvl53l1_insert_flush_events_lock(data);
+
+	mutex_unlock(&data->work_mutex);
+
+	return count;
 }
 
 static DEVICE_ATTR(do_flush, 0660/*S_IWUGO | S_IRUGO*/,
 			NULL,
 			stmvl53l1_do_flush);
 
-#if 0
-/* Get Current configuration info */
-static ssize_t stmvl53l1_show_current_configuration(struct device *dev,
-	struct device_attribute *attr, char *buf)
+static ssize_t stmvl53l1_show_enable_debug(struct device *dev,
+				struct device_attribute *attr, char *buf)
 {
-	int ret;
-	struct stmvl53l1_data *data = dev_get_drvdata(dev);
-
-	ret = scnprintf(buf, PAGE_SIZE, "VL53L1 current configuration id%d:\n",
-			data->id);
-
-	pr_err("Total Bytes returned = %d\n", ret);
-	return ret;
+	return scnprintf(buf, PAGE_SIZE, "%d\n", stmvl53l1_enable_debug);
 }
 
-/* DEVICE_ATTR(name,mode,show,store) */
-static DEVICE_ATTR(show_current_configuration, 0660/*S_IWUGO | S_IRUGO*/,
-	stmvl53l1_show_current_configuration,
-	NULL);
-#endif
+static ssize_t stmvl53l1_store_enable_debug(struct device *dev,
+					struct device_attribute *attr,
+					const char *buf, size_t count)
+{
+	int enable_debug;
+	int rc = 0;
+
+	if (kstrtoint(buf, 0, &enable_debug)) {
+		vl53l1_errmsg("invalid syntax in %s", buf);
+		rc = -EINVAL;
+	} else
+		stmvl53l1_enable_debug = enable_debug;
+
+	return rc ? rc : count;
+}
+
+/**
+ * sysfs attribute " debug enable" [rd/wr]
+ *
+ * dynamic control of vl53l1_dbgmsg messages. Note that in any case your code
+ * must be enable with DEBUG in stmvl53l1.h at compile time.
+ * @li 0 disable vl53l1_dbgmsg messages
+ * @li 1 enable vl53l1_dbgmsg messages
+ *
+ * @ingroup sysfs_attrib
+ */
+static DEVICE_ATTR(enable_debug, 0660/*S_IWUGO | S_IRUGO*/,
+				stmvl53l1_show_enable_debug,
+				stmvl53l1_store_enable_debug);
+
+static ssize_t display_FixPoint1616(char *buf, size_t size, FixPoint1616_t fix)
+{
+	uint32_t msb = fix >> 16;
+	uint32_t lsb = fix & 0xffff;
+
+	lsb = (lsb * 1000000ULL + 32768) / 65536;
+
+	return scnprintf(buf, size, "%d.%06d", msb, (uint32_t) lsb);
+}
+
+static ssize_t stmvl53l1_show_autonomous_config(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	struct stmvl53l1_data *data = dev_get_drvdata(dev);
+	ssize_t res = 0;
+
+	res += scnprintf(&buf[res], PAGE_SIZE, "%d %d %d %d %d %d %d ",
+		data->auto_pollingTimeInMs,
+		data->auto_config.DetectionMode,
+		data->auto_config.IntrNoTarget,
+		data->auto_config.Distance.CrossMode,
+		data->auto_config.Distance.High,
+		data->auto_config.Distance.Low,
+		data->auto_config.Rate.CrossMode);
+
+	res += display_FixPoint1616(&buf[res], PAGE_SIZE - res,
+		data->auto_config.Rate.High);
+
+	res += scnprintf(&buf[res], PAGE_SIZE - res, " ");
+
+	res += display_FixPoint1616(&buf[res], PAGE_SIZE - res,
+		data->auto_config.Rate.Low);
+
+	res += scnprintf(&buf[res], PAGE_SIZE - res, "\n");
+
+	return res;
+}
+
+static const char *parse_integer(const char *buf, int *res)
+{
+	int rc;
+
+	while (*buf == ' ')
+		buf++;
+	rc = sscanf(buf, "%d ", res);
+	if (!rc)
+		return NULL;
+
+	return strchr(buf, ' ');
+}
+
+static bool is_float_format(const char *buf, bool is_last)
+{
+	char *dot = strchr(buf, '.');
+	char *space_or_new_line = strchr(buf, is_last ? '\n' : ' ');
+
+	if (!space_or_new_line)
+		return !!dot;
+	if (!dot)
+		return false;
+
+	return dot < space_or_new_line ? true : false;
+}
+
+static int parse_FixPoint16x16_lsb(const char *lsb_char)
+{
+	int lsb = 0;
+	int digit_nb = 0;
+
+	/* parse at most 6 digits */
+	lsb_char++;
+	while (*lsb_char != ' ' && *lsb_char != '\n' && digit_nb < 6) {
+		lsb = lsb * 10 + (*lsb_char - '0');
+		lsb_char++;
+		digit_nb++;
+	}
+	while (digit_nb++ < 6)
+		lsb = lsb * 10;
+
+	return div64_s64(lsb * 65536ULL + 500000, 1000000);
+}
+
+/* parse next fix point value and return a pointer to next blank or newline
+ * character according to is_last parameter.
+ * parse string must have digit for integer part (something like '.125' will
+ * return an error) or an error will be return. Only the first 6 digit of the
+ * decimal part will be parsed.
+ */
+static const char *parse_FixPoint16x16(const char *buf, FixPoint1616_t *res,
+	bool is_last)
+{
+	bool is_float;
+	int msb;
+	int lsb = 0;
+	int rc;
+
+	while (*buf == ' ')
+		buf++;
+	is_float = is_float_format(buf, is_last);
+
+	/* scan msb */
+	rc = sscanf(buf, "%d ", &msb);
+	if (!rc)
+		return NULL;
+	/* then lsb if present */
+	if (is_float)
+		lsb = parse_FixPoint16x16_lsb(strchr(buf, '.'));
+	*res = (msb << 16) + lsb;
+
+	return strchr(buf, is_last ? '\n' : ' ');
+}
+
+static ssize_t stmvl53l1_store_autonomous_config(struct device *dev,
+					struct device_attribute *attr,
+					const char *buf, size_t count)
+{
+	struct stmvl53l1_data *data = dev_get_drvdata(dev);
+	int pollingTimeInMs, DetectionMode, IntrNoTarget;
+	int d_CrossMode, d_High, d_Low;
+	int r_CrossMode;
+	FixPoint1616_t r_High, r_Low;
+	const char *buf_ori = buf;
+	int rc;
+
+	mutex_lock(&data->work_mutex);
+
+	buf = parse_integer(buf, &pollingTimeInMs);
+	if (!buf)
+		goto invalid;
+	buf = parse_integer(buf, &DetectionMode);
+	if (!buf)
+		goto invalid;
+	buf = parse_integer(buf, &IntrNoTarget);
+	if (!buf)
+		goto invalid;
+	buf = parse_integer(buf, &d_CrossMode);
+	if (!buf)
+		goto invalid;
+	buf = parse_integer(buf, &d_High);
+	if (!buf)
+		goto invalid;
+	buf = parse_integer(buf, &d_Low);
+	if (!buf)
+		goto invalid;
+	buf = parse_integer(buf, &r_CrossMode);
+	if (!buf)
+		goto invalid;
+	buf = parse_FixPoint16x16(buf, &r_High, false);
+	if (!buf)
+		goto invalid;
+	buf = parse_FixPoint16x16(buf, &r_Low, true);
+	if (!buf)
+		goto invalid;
+
+	data->auto_pollingTimeInMs = pollingTimeInMs;
+	data->auto_config.DetectionMode = DetectionMode;
+	data->auto_config.IntrNoTarget = IntrNoTarget;
+	data->auto_config.Distance.CrossMode = d_CrossMode;
+	data->auto_config.Distance.High = d_High;
+	data->auto_config.Distance.Low = d_Low;
+	data->auto_config.Rate.CrossMode = r_CrossMode;
+	data->auto_config.Rate.High = r_High;
+	data->auto_config.Rate.Low = r_Low;
+
+	mutex_unlock(&data->work_mutex);
+
+	return count;
+
+invalid:
+	vl53l1_errmsg("invalid syntax in %s", buf_ori);
+	rc = -EINVAL;
+	goto error;
+
+error:
+	mutex_unlock(&data->work_mutex);
+
+	return rc;
+}
+
+/**
+ * sysfs attribute " autonomous_config" [rd/wr]
+ *
+ * Will set/get autonomous configuration using sysfs.
+ *
+ * format is the following :
+ * <poll_ms> <mode> <no_target_irq> <distance_mode> <distance_low>
+ * <distance_high> <rate_mode> <rate_low> <rate_high>
+ *
+ *@code
+ * > echo "1000 1 0 0 1000 300 0 2.2 1.001" > autonomous_config
+ *@endcode
+ *
+ * @ingroup sysfs_attrib
+ */
+static DEVICE_ATTR(autonomous_config, 0660/*S_IWUGO | S_IRUGO*/,
+				stmvl53l1_show_autonomous_config,
+				stmvl53l1_store_autonomous_config);
+static ssize_t stmvl53l1_show_last_error_config(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	struct stmvl53l1_data *data = dev_get_drvdata(dev);
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", data->last_error);
+}
+
+static ssize_t stmvl53l1_show_enable_sar(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	struct stmvl53l1_data *data = dev_get_drvdata(dev);
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", data->sar_mode);
+}
+
+static ssize_t stmvl53l1_store_enable_sar(struct device *dev,
+					struct device_attribute *attr,
+					const char *buf, size_t count)
+{
+	struct stmvl53l1_data *data = dev_get_drvdata(dev);
+	int rc = 0;
+	int mode;
+
+	mutex_lock(&data->work_mutex);
+
+	if (kstrtoint(buf, 0, &mode)) {
+		vl53l1_errmsg("invalid syntax in %s\n", buf);
+		rc = -EINVAL;
+	} else {
+		data->sar_mode = mode?1:0;
+		vl53l1_dbgmsg("sar mode is set to %d\n", data->sar_mode);
+
+		if (data->sar_mode == 1) {
+			if (mode == 1) {
+				/* report far distance as initial value */
+				struct input_dev *input = data->input_dev_ps;
+
+				input_report_abs(input, ABS_HAT1X, 100);
+				input_report_abs(input, ABS_HAT1X, 101);
+				input_report_abs(input, ABS_HAT1X, 100);
+				input_sync(input);
+			}
+			activate_sar_mode(data);
+		} else
+			deactivate_sar_mode(data);
+	}
+
+	mutex_unlock(&data->work_mutex);
+
+	return rc ? rc : count;
+}
+
+/**
+ * sysfs attribute "enable_sar" [rd/wr]
+ *
+ * To enable/disable the sar mode
+ * @li 0 disable sar mode
+ * @li 1 enable sar mode
+ *
+ * @ingroup sysfs_attrib
+ */
+static DEVICE_ATTR(enable_sar, 0660/*S_IWUGO | S_IRUGO*/,
+				stmvl53l1_show_enable_sar,
+				stmvl53l1_store_enable_sar);
+
+static ssize_t stmvl53l1_show_offset(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	struct stmvl53l1_data *data = dev_get_drvdata(dev);
+
+	return scnprintf(buf, PAGE_SIZE, "%d,%d\n",
+			data->inner_offset, data->outer_offset);
+}
+
+static ssize_t stmvl53l1_store_offset(struct device *dev,
+					struct device_attribute *attr,
+					const char *buf, size_t count)
+{
+	struct stmvl53l1_data *data = dev_get_drvdata(dev);
+	VL53L1_CalibrationData_t cali_data;
+	int rc = 0;
+	int n = 0;
+	int inner = 0;
+	int outer = 0;
+
+	mutex_lock(&data->work_mutex);
+
+	if (data->enable_sensor) {
+		vl53l1_errmsg("can't set offset while ranging\n");
+		rc = -EBUSY;
+		goto finish;
+	}
+
+	n = sscanf(buf, "%d,%d", &inner, &outer);
+	if(n != 2) {
+		vl53l1_errmsg("wrong offset syntax around %s\n", buf);
+		rc = -EINVAL;
+		goto finish;
+	}
+
+	memset(&cali_data, 0, sizeof(cali_data));
+	rc = VL53L1_GetCalibrationData(&data->stdev, &cali_data);
+	if (rc) {
+		vl53l1_errmsg("VL53L1_GetCalibrationData fail\n");
+		rc = -EINVAL;
+		goto finish;
+	}
+
+	/* update offset values */
+	vl53l1_info("previous offset is %d,%d\n",
+			cali_data.customer.mm_config__inner_offset_mm,
+			cali_data.customer.mm_config__outer_offset_mm);
+	cali_data.customer.mm_config__inner_offset_mm = inner;
+	cali_data.customer.mm_config__outer_offset_mm = outer;
+
+	rc = VL53L1_SetCalibrationData(&data->stdev, &cali_data);
+	if (rc) {
+		vl53l1_errmsg("VL53L1_SetCalibrationData fail\n");
+		rc = -EINVAL;
+		goto finish;
+	}
+
+	data->inner_offset = (int16_t)inner;
+	data->outer_offset = (int16_t)outer;
+	vl53l1_info("offset is set to %d,%d\n", inner, outer);
+finish:
+	mutex_unlock(&data->work_mutex);
+	return rc ? rc : count;
+}
+
+/**
+ * sysfs attribute "enable_sar" [rd/wr]
+ *
+ * To enable/disable the sar mode
+ * @li 0 disable sar mode
+ * @li 1 enable sar mode
+ *
+ * @ingroup sysfs_attrib
+ */
+static DEVICE_ATTR(offset, 0660/*S_IWUGO | S_IRUGO*/,
+				stmvl53l1_show_offset,
+				stmvl53l1_store_offset);
+static DEVICE_ATTR(last_error, 0440/*S_IRUGO*/,
+				stmvl53l1_show_last_error_config,
+				NULL);
 static struct attribute *stmvl53l1_attributes[] = {
 	&dev_attr_enable_ps_sensor.attr,
 	&dev_attr_set_delay_ms.attr,
@@ -941,9 +1789,15 @@ static struct attribute *stmvl53l1_attributes[] = {
 	&dev_attr_roi.attr,
 	&dev_attr_mode.attr,
 	&dev_attr_do_flush.attr,
-	/* &dev_attr_enable_debug.attr,
-	 * &dev_attr_show_current_configuration.attr ,
-	 */
+	&dev_attr_distance_mode.attr,
+	&dev_attr_crosstalk_enable.attr,
+	&dev_attr_enable_debug.attr,
+	&dev_attr_output_mode.attr,
+	&dev_attr_force_device_on_enable.attr,
+	&dev_attr_autonomous_config.attr,
+	&dev_attr_enable_sar.attr,
+	&dev_attr_offset.attr,
+	&dev_attr_last_error.attr,
 	NULL
 };
 
@@ -958,6 +1812,9 @@ static int ctrl_reg_access(struct stmvl53l1_data *data, void *p)
 	struct stmvl53l1_register reg;
 	size_t total_byte;
 	int rc;
+
+	if (data->is_device_remove)
+		return -ENODEV;
 
 	total_byte = offsetof(struct stmvl53l1_register, data.b);
 	if (copy_from_user(&reg, p, total_byte)) {
@@ -988,6 +1845,8 @@ static int ctrl_reg_access(struct stmvl53l1_data *data, void *p)
 		total_byte = offsetof(struct stmvl53l1_register, data.b);
 		vl53l1_dbgmsg("wr %x %d bytes statu %d\n",
 				reg.index, reg.cnt, rc);
+		if (rc)
+			rc = store_last_error(data, rc);
 	} else {
 		rc = VL53L1_ReadMulti(&data->stdev, (uint16_t)reg.index,
 				reg.data.bytes, reg.cnt);
@@ -995,9 +1854,11 @@ static int ctrl_reg_access(struct stmvl53l1_data *data, void *p)
 		vl53l1_dbgmsg("rd %x %d bytes status %d\n",
 				reg.index, reg.cnt, rc);
 		/*  if fail do not copy back data only status */
-		if (rc)
+		if (rc) {
 			total_byte = offsetof(struct stmvl53l1_register,
 					data.b);
+			rc = store_last_error(data, rc);
+		}
 		/* else the total byte is already the full pay-load with data */
 	}
 
@@ -1018,16 +1879,23 @@ static int ctrl_start(struct stmvl53l1_data *data)
 
 	mutex_lock(&data->work_mutex);
 
+	if (data->is_device_remove) {
+		rc = -ENODEV;
+		goto done;
+	}
+
 	vl53l1_dbgmsg(" state = %d\n", data->enable_sensor);
 
 	/* turn on tof sensor only if it's not already started */
-	if (data->enable_sensor == 0) {
+	if (data->enable_sensor == 0 && !data->is_calibrating) {
 		/* to start */
 		rc = stmvl53l1_start(data);
 	} else{
 		rc = -EBUSY;
 	}
 	vl53l1_dbgmsg(" final state = %d\n", data->enable_sensor);
+
+done:
 	mutex_unlock(&data->work_mutex);
 
 	return rc;
@@ -1045,6 +1913,8 @@ static int _ctrl_stop(struct stmvl53l1_data *data)
 	int rc;
 
 	vl53l1_dbgmsg("enter state = %d\n", data->enable_sensor);
+	/* be sure waiters are woken */
+	data->is_data_valid = true;
 	/* turn on tof sensor only if it's not enabled by other	client */
 	if (data->enable_sensor == 1) {
 		/* to stop */
@@ -1053,6 +1923,7 @@ static int _ctrl_stop(struct stmvl53l1_data *data)
 		vl53l1_dbgmsg("already off did nothing\n");
 		rc = 0;
 	}
+	stmvl53l1_insert_flush_events_lock(data);
 	vl53l1_dbgmsg("	final state = %d\n", data->enable_sensor);
 
 	return rc;
@@ -1071,6 +1942,45 @@ static int ctrl_stop(struct stmvl53l1_data *data)
 	int rc;
 
 	mutex_lock(&data->work_mutex);
+
+	if (data->is_device_remove) {
+		rc = -ENODEV;
+		goto done;
+	}
+
+	if (data->enable_sensor) {
+		rc = _ctrl_stop(data);
+
+		if (data->cam_mode == 1) {
+			/* only restore sar mode when
+			   it quits from camera mode */
+			data->cam_mode = 0;
+
+			if (data->sar_mode == 1) {
+				vl53l1_info("restore sar mode\n");
+				activate_sar_mode(data);
+			}
+		}
+	} else
+		rc = -EBUSY;
+done:
+	mutex_unlock(&data->work_mutex);
+
+	return rc;
+}
+
+/**
+ * get work lock and suspend sensor without checking sar mode
+ *
+ * @param data device
+ * @return 0 on success EBUSY if arleady off
+ */
+static int ctrl_suspend(struct stmvl53l1_data *data)
+{
+	int rc;
+
+	mutex_lock(&data->work_mutex);
+	vl53l1_info("enter ctrl_suspend\n");
 	if (data->enable_sensor)
 		rc = _ctrl_stop(data);
 	else
@@ -1080,23 +1990,111 @@ static int ctrl_stop(struct stmvl53l1_data *data)
 	return rc;
 }
 
+static int get_output_data_index(struct stmvl53l1_data *data)
+{
+	VL53L1_MultiRangingData_t *meas = &data->meas.multi_range_data;
+	int i;
+	int index = 0;
+
+	/* multi_range_data already sort by proximity */
+	if (data->output_mode == VL53L1_OUTPUTMODE_NEAREST)
+		return 0;
+
+	/* else output mode is VL53L1_OUTPUTMODE_STRONGEST */
+	for (i = 1; i < meas->NumberOfObjectsFound; i++)
+		if (meas->RangeData[i].SignalRateRtnMegaCps >
+		    meas->RangeData[index].SignalRateRtnMegaCps)
+			index = i;
+
+	return index;
+}
 
 static int ctrl_getdata(struct stmvl53l1_data *data, void __user *p)
 {
 	int rc;
+	int index;
 
 	mutex_lock(&data->work_mutex);
-	/* TODO shall we fail if current mode  is not "standard ranging" */
 
-	/* TODO sort how we agrettated and pass driver and ll driver to user */
+	if (data->is_device_remove) {
+		rc = -ENODEV;
+		goto done;
+	}
+	index = get_output_data_index(data);
 	rc = copy_to_user(p,
-		&data->meas.multi_range_data.RangeData[0],
+		&data->meas.multi_range_data.RangeData[index],
 		sizeof(stmvl531_range_data_t));
 	if (rc) {
 		vl53l1_dbgmsg("copy to user fail %d", rc);
 		rc = -EFAULT;
 	}
+
+done:
 	mutex_unlock(&data->work_mutex);
+
+	return rc;
+}
+
+static bool is_new_data_for_me(struct stmvl53l1_data *data, pid_t pid,
+	struct list_head *head)
+{
+	return data->is_data_valid && !is_pid_in_list(pid, head);
+}
+
+static bool sleep_for_data_condition(struct stmvl53l1_data *data, pid_t pid,
+	struct list_head *head)
+{
+	bool res;
+
+	mutex_lock(&data->work_mutex);
+	res = is_new_data_for_me(data, pid, head);
+	mutex_unlock(&data->work_mutex);
+
+	return res;
+}
+
+static int sleep_for_data(struct stmvl53l1_data *data, pid_t pid,
+				struct list_head *head)
+{
+	int rc;
+
+	mutex_unlock(&data->work_mutex);
+	rc = wait_event_killable(data->waiter_for_data,
+				sleep_for_data_condition(data, pid, head));
+	mutex_lock(&data->work_mutex);
+
+	return data->enable_sensor ? rc : -ENODEV;
+}
+
+static int ctrl_getdata_blocking(struct stmvl53l1_data *data, void __user *p)
+{
+	int rc = 0;
+	pid_t pid = current->pid;
+	int index;
+
+	mutex_lock(&data->work_mutex);
+	/* If device not ranging then exit on error */
+	if (data->is_device_remove || !data->enable_sensor) {
+		rc = -ENODEV;
+		goto done;
+	}
+	/* sleep if data already read */
+	if (!is_new_data_for_me(data, pid, &data->simple_data_reader_list))
+		rc = sleep_for_data(data, pid, &data->simple_data_reader_list);
+	if (rc)
+		goto done;
+
+	/* unless we got interrupted we return data to user and note read */
+	index = get_output_data_index(data);
+	rc = copy_to_user(p, &data->meas.multi_range_data.RangeData[index],
+		sizeof(stmvl531_range_data_t));
+	if (rc)
+		goto done;
+	rc = add_reader(pid, &data->simple_data_reader_list);
+
+done:
+	mutex_unlock(&data->work_mutex);
+
 	return rc;
 }
 
@@ -1117,7 +2115,10 @@ static int ctrl_mz_data(struct stmvl53l1_data *data, void __user *p)
 	int rc;
 
 	mutex_lock(&data->work_mutex);
-	/* FIXME as of rev 770  ll is not handling this properly */
+	if (data->is_device_remove) {
+		rc = -ENODEV;
+		goto done;
+	}
 	rc = copy_to_user(p, &data->meas.multi_range_data,
 		sizeof(VL53L1_MultiRangingData_t));
 	if (rc) {
@@ -1129,10 +2130,51 @@ static int ctrl_mz_data(struct stmvl53l1_data *data, void __user *p)
 	} else
 	if (!is_mz_mode(data))
 		rc = -ENOEXEC;
+
+done:
 	mutex_unlock(&data->work_mutex);
+
 	return rc;
 }
 
+static int ctrl_mz_data_blocking(struct stmvl53l1_data *data, void __user *p)
+{
+	int rc = 0;
+	VL53L1_MultiRangingData_t *meas =  &data->meas.multi_range_data;
+	pid_t pid = current->pid;
+
+	mutex_lock(&data->work_mutex);
+	if (data->is_device_remove) {
+		rc = -ENODEV;
+		goto done;
+	}
+	/* mode 2 or 3 */
+	if (!is_mz_mode(data)) {
+		rc = -ENOEXEC;
+		goto done;
+	}
+	/* If device not ranging then exit on error */
+	if (!data->enable_sensor) {
+		rc = -ENODEV;
+		goto done;
+	}
+	/* sleep if data already read */
+	if (!is_new_data_for_me(data, pid, &data->mz_data_reader_list))
+		rc = sleep_for_data(data, pid, &data->mz_data_reader_list);
+	if (rc)
+		goto done;
+
+	/* unless we got interrupted we return data to user and note read */
+	rc = copy_to_user(p, meas, sizeof(VL53L1_MultiRangingData_t));
+	if (rc)
+		goto done;
+	rc = add_reader(pid, &data->mz_data_reader_list);
+
+done:
+	mutex_unlock(&data->work_mutex);
+
+	return rc;
+}
 
 static int ctrl_param_timing_budget(struct stmvl53l1_data *data,
 		struct stmvl53l1_parameter *param)
@@ -1146,24 +2188,11 @@ static int ctrl_param_timing_budget(struct stmvl53l1_data *data,
 		rc = 0;
 		vl53l1_dbgmsg("TIMINGBUDGET_PAR get status %d", rc);
 	} else {
-		/* SET */
-		if (data->enable_sensor) {
-			/* can't change while ranging */
-			vl53l1_errmsg("can't change while ranging ");
-			rc = -EBUSY;
-			goto done;
-		}
-		/* get timing form ap */
-		if (param->value <= 0) {
-			rc = -EINVAL;
-		} else {
-			data->timing_budget = param->value;
-			rc = 0;
-		}
+		rc = stmvl53l1_set_timing_budget(data, param->value);
 		vl53l1_dbgmsg("TIMINGBUDGET_PAR set status %d is %d", rc,
 				data->timing_budget);
 	}
-done:
+
 	return rc;
 }
 /**
@@ -1182,11 +2211,12 @@ static int ctrl_param_poll_delay(struct stmvl53l1_data *data,
 		param->value = data->poll_delay_ms;
 		param->status = 0;
 		vl53l1_dbgmsg("poll delay get %d ms", param->value);
-	} else {
-		data->poll_delay_ms = param->value;
 		rc = 0;
+	} else {
+		rc = stmvl53l1_set_poll_delay_ms(data, param->value);
 		vl53l1_dbgmsg("poll delay set %d ms", data->poll_delay_ms);
 	}
+
 	return rc;
 }
 
@@ -1202,32 +2232,135 @@ static int ctrl_param_mode(struct stmvl53l1_data *data,
 		vl53l1_dbgmsg("get mode %d", param->value);
 		rc = 0;
 	} else {
-		if (data->enable_sensor) {
-			rc = -EBUSY;
-			vl53l1_errmsg("can't set mode while ranging\n");
-			goto done_set;
-		}
-		switch (param->value) {
-		case VL53L1_PRESETMODE_RANGING:
-		case VL53L1_PRESETMODE_MULTIZONES_SCANNING:
-		case VL53L1_PRESETMODE_LITE_RANGING:
-			data->preset_mode = param->value;
-			rc = 0;
-			break;
-		case VL53L1_PRESETMODE_AUTONOMOUS:
-			vl53l1_errmsg("VL53L1_PRESETMODE_AUTONOMOUS not yet \
-				implemented");
-			rc = -EINVAL;
-			break;
-		default:
-			vl53l1_errmsg("invalid mode %d\n", param->value);
-			rc = -EINVAL;
-			break;
-		}
-done_set:
+		rc = stmvl53l1_set_mode(data, param->value);
 		vl53l1_dbgmsg("rc %d req %d now %d", rc,
 				param->value, data->preset_mode);
 	}
+	return rc;
+}
+
+static int ctrl_param_distance_mode(struct stmvl53l1_data *data,
+		struct stmvl53l1_parameter *param)
+{
+	int rc;
+
+	if (param->is_read) {
+		param->value = data->distance_mode;
+		param->status = 0;
+		vl53l1_dbgmsg("get distance mode %d", param->value);
+		rc = 0;
+	} else {
+		rc = stmvl53l1_set_distance_mode(data, param->value);
+		vl53l1_dbgmsg("rc %d req %d now %d", rc,
+				param->value, data->distance_mode);
+	}
+
+	return rc;
+}
+
+static int ctrl_param_crosstalk_enable(struct stmvl53l1_data *data,
+		struct stmvl53l1_parameter *param)
+{
+	int rc;
+
+	if (param->is_read) {
+		param->value = data->crosstalk_enable;
+		param->status = 0;
+		vl53l1_dbgmsg("get crosstalk enable mode %d", param->value);
+		rc = 0;
+	} else {
+		rc = stmvl53l1_set_crosstalk_enable(data, param->value);
+		vl53l1_dbgmsg("rc %d req %d now %d", rc,
+				param->value, data->crosstalk_enable);
+	}
+
+	return rc;
+}
+
+static int ctrl_param_output_mode(struct stmvl53l1_data *data,
+		struct stmvl53l1_parameter *param)
+{
+	int rc;
+
+	if (param->is_read) {
+		param->value = data->output_mode;
+		param->status = 0;
+		vl53l1_dbgmsg("get output mode %d", param->value);
+		rc = 0;
+	} else {
+		rc = stmvl53l1_set_output_mode(data, param->value);
+		vl53l1_dbgmsg("rc %d req %d now %d", rc,
+				param->value, data->output_mode);
+	}
+
+	return rc;
+}
+
+static int ctrl_force_device_on_en(struct stmvl53l1_data *data,
+		struct stmvl53l1_parameter *param)
+{
+	int rc;
+
+	if (param->is_read) {
+		param->value = data->force_device_on_en;
+		param->status = 0;
+		vl53l1_dbgmsg("get force device on %d", param->value);
+		rc = 0;
+	} else {
+		rc = stmvl53l1_set_force_device_on_en(data, param->value);
+		vl53l1_dbgmsg("rc %d req %d now %d", rc,
+				param->value, data->force_device_on_en);
+	}
+
+	return rc;
+}
+
+static int ctrl_param_last_error(struct stmvl53l1_data *data,
+		struct stmvl53l1_parameter *param)
+{
+	int rc;
+
+	if (param->is_read) {
+		param->value = data->last_error;
+		param->status = 0;
+		vl53l1_dbgmsg("get last error %d", param->value);
+		rc = 0;
+	} else {
+		rc = -EINVAL;
+	}
+
+	return rc;
+}
+
+static int ctrl_param_camera_mode(struct stmvl53l1_data *data,
+		struct stmvl53l1_parameter *param)
+{
+	if (param->is_read) {
+		param->value = data->cam_mode;
+		param->status = 0;
+		vl53l1_dbgmsg("get camera mode %d", param->value);
+	} else {
+		data->cam_mode = param->value;
+		vl53l1_dbgmsg("set camera mode %d", param->value);
+	}
+
+	return 0;
+}
+
+static int ctrl_param_hw_rev(struct stmvl53l1_data *data,
+		struct stmvl53l1_parameter *param)
+{
+	int rc;
+
+	if (param->is_read) {
+		param->value = data->hw_rev;
+		param->status = 0;
+		vl53l1_dbgmsg("get hw rev %d", param->value);
+		rc = 0;
+	} else {
+		rc = -EINVAL;
+	}
+
 	return rc;
 }
 
@@ -1244,6 +2377,11 @@ static int ctrl_params(struct stmvl53l1_data *data, void __user *p)
 	struct stmvl53l1_parameter param;
 
 	mutex_lock(&data->work_mutex);
+
+	if (data->is_device_remove) {
+		rc = -ENODEV;
+		goto done;
+	}
 	rc = copy_from_user(&param, p, sizeof(param));
 	if (rc) {
 		rc = -EFAULT;
@@ -1259,6 +2397,27 @@ static int ctrl_params(struct stmvl53l1_data *data, void __user *p)
 	case VL53L1_DEVICEMODE_PAR:
 		rc = ctrl_param_mode(data, &param);
 	break;
+	case VL53L1_DISTANCEMODE_PAR:
+		rc = ctrl_param_distance_mode(data, &param);
+	break;
+	case VL53L1_XTALKENABLE_PAR:
+		rc = ctrl_param_crosstalk_enable(data, &param);
+	break;
+	case VL53L1_OUTPUTMODE_PAR:
+		rc = ctrl_param_output_mode(data, &param);
+	break;
+	case VL53L1_FORCEDEVICEONEN_PAR:
+		rc = ctrl_force_device_on_en(data, &param);
+	break;
+	case VL53L1_LASTERROR_PAR:
+		rc = ctrl_param_last_error(data, &param);
+	break;
+	case VL53L1_CAMERAMODE_PAR:
+		rc = ctrl_param_camera_mode(data, &param);
+		break;
+	case VL53L1_HWREV_PAR:
+		rc = ctrl_param_hw_rev(data, &param);
+		break;
 	default:
 		vl53l1_errmsg("unknown or unsupported %d\n", param.name);
 		rc = -EINVAL;
@@ -1292,6 +2451,10 @@ static int ctrl_roi(struct stmvl53l1_data *data, void __user *p)
 	struct stmvl53l1_roi_full_t rois;
 
 	mutex_lock(&data->work_mutex);
+	if (data->is_device_remove) {
+		rc = -ENODEV;
+		goto done;
+	}
 	/* copy fixed part of args at first */
 	rc = copy_from_user(&rois, p,
 			offsetof(struct stmvl53l1_roi_full_t,
@@ -1348,28 +2511,289 @@ done:
 	return rc;
 }
 
+static int ctrl_autonomous_config(struct stmvl53l1_data *data, void __user *p)
+{
+	int rc = 0;
+	struct stmvl53l1_autonomous_config_t full;
+
+	mutex_lock(&data->work_mutex);
+	if (data->is_device_remove) {
+		rc = -ENODEV;
+		goto done;
+	}
+	/* first copy all data */
+	rc = copy_from_user(&full, p, sizeof(full));
+	if (rc) {
+		rc = -EFAULT;
+		goto done;
+	}
+
+	if (full.is_read) {
+		full.pollingTimeInMs = data->auto_pollingTimeInMs;
+		full.config = data->auto_config;
+		rc = copy_to_user(p, &full, sizeof(full));
+		if (rc)
+			rc = -EFAULT;
+	} else {
+		if (data->enable_sensor) {
+			rc = -EBUSY;
+			vl53l1_errmsg("can't change config while ranging\n");
+			goto done;
+		}
+		data->auto_pollingTimeInMs = full.pollingTimeInMs;
+		data->auto_config = full.config;
+	}
+
+done:
+	mutex_unlock(&data->work_mutex);
+
+	return rc;
+}
+
+static int ctrl_autonomous_config_cam(struct stmvl53l1_data *data,
+		void __user *p)
+{
+	int rc = 0;
+	struct stmvl53l1_autonomous_config_t full;
+
+	mutex_lock(&data->work_mutex);
+	if (data->is_device_remove) {
+		rc = -ENODEV;
+		goto done;
+	}
+	/* first copy all data */
+	rc = copy_from_user(&full, p, sizeof(full));
+	if (rc) {
+		rc = -EFAULT;
+		goto done;
+	}
+
+	if (full.is_read) {
+		full.pollingTimeInMs = data->auto_pollingTimeInMs_cam;
+		full.config = data->auto_config_cam;
+		rc = copy_to_user(p, &full, sizeof(full));
+		if (rc)
+			rc = -EFAULT;
+	} else {
+		if (data->enable_sensor) {
+			rc = -EBUSY;
+			vl53l1_errmsg("can't change config while ranging\n");
+			goto done;
+		}
+		data->auto_pollingTimeInMs_cam = full.pollingTimeInMs;
+		data->auto_config_cam = full.config;
+	}
+
+done:
+	mutex_unlock(&data->work_mutex);
+
+	return rc;
+}
+
+static int ctrl_calibration_data(struct stmvl53l1_data *data, void __user *p)
+{
+	int rc;
+	struct stmvl53l1_ioctl_calibration_data_t calib;
+	int data_offset = offsetof(struct stmvl53l1_ioctl_calibration_data_t,
+					data);
+
+	mutex_lock(&data->work_mutex);
+
+	if (data->is_device_remove) {
+		rc = -ENODEV;
+		goto done;
+	}
+	rc = copy_from_user(&calib, p, data_offset);
+	if (rc) {
+		vl53l1_errmsg("fail to detect read or write %d", rc);
+		rc = -EFAULT;
+		goto done;
+	}
+
+	if (calib.is_read) {
+		memset(&calib.data, 0, sizeof(calib.data));
+		rc = VL53L1_GetCalibrationData(&data->stdev, &calib.data);
+		if (rc) {
+			vl53l1_errmsg("VL53L1_GetCalibrationData fail %d", rc);
+			rc = store_last_error(data, rc);
+			goto done;
+		}
+		rc = copy_to_user(p + data_offset, &calib.data,
+			sizeof(calib.data));
+	} else {
+		if (data->enable_sensor) {
+			rc = -EBUSY;
+			vl53l1_errmsg("can't set calib data while ranging\n");
+			goto done;
+		}
+		rc = copy_from_user(&calib.data, p + data_offset,
+			sizeof(calib.data));
+		if (rc) {
+			vl53l1_errmsg("fail to copy calib data");
+			rc = -EFAULT;
+			goto done;
+		}
+		rc = VL53L1_SetCalibrationData(&data->stdev, &calib.data);
+		if (rc) {
+			vl53l1_errmsg("VL53L1_SetCalibrationData fail %d", rc);
+			rc = store_last_error(data, rc);
+		}
+	}
+
+done:
+	mutex_unlock(&data->work_mutex);
+
+	return rc;
+}
+
+static int ctrl_perform_calibration_ref_spad_lock(struct stmvl53l1_data *data,
+	struct stmvl53l1_ioctl_perform_calibration_t *calib)
+{
+	int rc = VL53L1_PerformRefSpadManagement(&data->stdev);
+
+	if (rc) {
+		vl53l1_errmsg("VL53L1_PerformRefSpadManagement fail => %d", rc);
+		rc = store_last_error(data, rc);
+	}
+
+	return rc;
+}
+
+static int ctrl_perform_calibration_crosstalk_lock(struct stmvl53l1_data *data,
+	struct stmvl53l1_ioctl_perform_calibration_t *calib)
+{
+	int rc = VL53L1_PerformXTalkCalibration(&data->stdev, calib->param1);
+
+	if (rc) {
+		vl53l1_errmsg("VL53L1_PerformXTalkCalibration fail => %d", rc);
+		rc = store_last_error(data, rc);
+	}
+
+	return rc;
+}
+
+static int ctrl_perform_calibration_offset_lock(struct stmvl53l1_data *data,
+	struct stmvl53l1_ioctl_perform_calibration_t *calib)
+{
+	int rc;
+
+	vl53l1_info("VL53L1_SetOffsetCalibrationMode para: %d %d %d\n", calib->param1,
+			calib->param2, calib->param3);
+	rc = VL53L1_SetOffsetCalibrationMode(&data->stdev, calib->param1);
+	if (rc) {
+		vl53l1_errmsg("VL53L1_SetOffsetCalibrationMode fail => %d", rc);
+		rc = store_last_error(data, rc);
+		goto done;
+	}
+	rc = VL53L1_PerformOffsetCalibration(&data->stdev, calib->param2,
+		calib->param3);
+	if (rc) {
+		vl53l1_errmsg("VL53L1_PerformOffsetCalibration fail => %d", rc);
+		rc = store_last_error(data, rc);
+	}
+
+done:
+	return rc;
+}
+
+static int ctrl_perform_calibration(struct stmvl53l1_data *data, void __user *p)
+{
+	int rc;
+	struct stmvl53l1_ioctl_perform_calibration_t calib;
+
+	mutex_lock(&data->work_mutex);
+
+	if (data->is_device_remove) {
+		rc = -ENODEV;
+		goto done;
+	}
+	data->is_calibrating = true;
+	rc = copy_from_user(&calib, p, sizeof(calib));
+	if (rc) {
+		rc = -EFAULT;
+		goto done;
+	}
+	if (data->enable_sensor) {
+		rc = -EBUSY;
+		vl53l1_errmsg("can't perform calibration while ranging\n");
+		goto done;
+	}
+
+	rc = reset_release(data);
+	if (rc)
+		goto done;
+
+	rc = VL53L1_StaticInit(&data->stdev);
+	if (rc) {
+		vl53l1_errmsg("VL53L1_StaticInit fail => %d", rc);
+		rc = store_last_error(data, rc);
+		goto done;
+	}
+
+	switch (calib.calibration_type) {
+	case VL53L1_CALIBRATION_REF_SPAD:
+		rc = ctrl_perform_calibration_ref_spad_lock(data,
+			&calib);
+		break;
+	case VL53L1_CALIBRATION_CROSSTALK:
+		rc = ctrl_perform_calibration_ref_spad_lock(data,
+			&calib);
+		if (rc) {
+			vl53l1_errmsg("RefSpad Calibration error = %d\n", rc);
+			goto done;
+		}
+		rc = ctrl_perform_calibration_crosstalk_lock(data,
+			&calib);
+		break;
+	case VL53L1_CALIBRATION_OFFSET:
+		vl53l1_info("perform ref spad calibration first...\n");
+		rc = ctrl_perform_calibration_ref_spad_lock(data,
+			&calib);
+		if (rc) {
+			vl53l1_errmsg("RefSpad Calibration error = %d\n", rc);
+			goto done;
+		}
+		rc = ctrl_perform_calibration_offset_lock(data,
+			&calib);
+		break;
+	default:
+		rc = -EINVAL;
+		break;
+	}
+	reset_hold(data);
+
+done:
+	data->is_calibrating = false;
+	mutex_unlock(&data->work_mutex);
+
+	return rc;
+}
+
 static int stmvl53l1_ioctl_handler(
 		struct stmvl53l1_data *data,
 		unsigned int cmd, unsigned long arg,
 		void __user *p)
 {
 	int rc = 0;
-	int8_t offsetint8;
 
 	if (!data)
 		return -EINVAL;
 
 	switch (cmd) {
 
-	case VL53L1_IOCTL_INIT:
-		vl53l1_dbgmsg("VL53L1_IOCTL_INIT\n");
+	case VL53L1_IOCTL_START:
+		vl53l1_dbgmsg("VL53L1_IOCTL_START\n");
 		rc = ctrl_start(data);
 		break;
 
 	case VL53L1_IOCTL_STOP:
 		vl53l1_dbgmsg("VL53L1_IOCTL_STOP\n");
 		rc = ctrl_stop(data);
-		/* TODO rc may not be errno could be "ST err code" */
+		break;
+
+	case VL53L1_IOCTL_SUSPEND:
+		vl53l1_dbgmsg("VL53L1_IOCTL_SUSPEND\n");
+		rc = ctrl_suspend(data);
 		break;
 
 	case VL53L1_IOCTL_GETDATAS:
@@ -1377,17 +2801,9 @@ static int stmvl53l1_ioctl_handler(
 		rc = ctrl_getdata(data, p);
 		break;
 
-	/* set offset calibration */
-	case VL53L1_IOCTL_SETOFFSET:
-		vl53l1_dbgmsg("VL53L1_IOCTL_SETOFFSET\n");
-		if (copy_from_user(&offsetint8, (int8_t *)p, sizeof(int8_t))) {
-			vl53l1_errmsg("%d, fail\n", __LINE__);
-			return -EFAULT;
-		}
-		vl53l1_dbgmsg("SETOFFSET as %d\n", offsetint8);
-		/* later
-		 * SetOffsetCalibrationData(vl53l0_dev, offsetint);
-		*/
+	case VL53L1_IOCTL_GETDATAS_BLOCKING:
+		/* vl53l1_dbgmsg("VL53L1_IOCTL_GETDATAS_BLOCKING\n"); */
+		rc = ctrl_getdata_blocking(data, p);
 		break;
 
 	/* Register tool */
@@ -1409,6 +2825,25 @@ static int stmvl53l1_ioctl_handler(
 		/* vl53l1_dbgmsg("VL53L1_IOCTL_MZ_DATA\n"); */
 		rc = ctrl_mz_data(data, p);
 		break;
+	case VL53L1_IOCTL_MZ_DATA_BLOCKING:
+		/* vl53l1_dbgmsg("VL53L1_IOCTL_MZ_DATA_BLOCKING\n"); */
+		rc = ctrl_mz_data_blocking(data, p);
+		break;
+	case VL53L1_IOCTL_CALIBRATION_DATA:
+		vl53l1_dbgmsg("VL53L1_IOCTL_CALIBRATION_DATA\n");
+		rc = ctrl_calibration_data(data, p);
+		break;
+	case VL53L1_IOCTL_PERFORM_CALIBRATION:
+		vl53l1_dbgmsg("VL53L1_IOCTL_PERFORM_CALIBRATION\n");
+		rc = ctrl_perform_calibration(data, p);
+		break;
+	case VL53L1_IOCTL_AUTONOMOUS_CONFIG:
+		vl53l1_dbgmsg("VL53L1_IOCTL_AUTONOMOUS_CONFIG\n");
+		if (data->cam_mode == 0)
+			rc = ctrl_autonomous_config(data, p);
+		else
+			rc = ctrl_autonomous_config_cam(data, p);
+		break;
 	default:
 		rc = -EINVAL;
 		break;
@@ -1421,13 +2856,25 @@ static int stmvl53l1_ioctl_handler(
 
 static int stmvl53l1_open(struct inode *inode, struct file *file)
 {
-	/* TODO misc dev open */
+	struct stmvl53l1_data *data = container_of(file->private_data,
+		struct stmvl53l1_data, miscdev);
+
+	vl53l1_dbgmsg("Start\n");
+	stmvl53l1_module_func_tbl.get(data->client_object);
+	vl53l1_dbgmsg("End\n");
+
 	return 0;
 }
 
 static int stmvl53l1_release(struct inode *inode, struct file *file)
 {
-	/* TODO misc dev release */
+	struct stmvl53l1_data *data = container_of(file->private_data,
+		struct stmvl53l1_data, miscdev);
+
+	vl53l1_dbgmsg("Start\n");
+	stmvl53l1_module_func_tbl.put(data->client_object);
+	vl53l1_dbgmsg("End\n");
+
 	return 0;
 }
 
@@ -1449,40 +2896,52 @@ static void stmvl53l1_on_newdata_event(struct stmvl53l1_data *data)
 {
 	int rc;
 	VL53L1_MultiRangingData_t *pmrange;
+	VL53L1_MultiRangingData_t *tmprange;
 	long ts_msec;
+	int i;
 
 	do_gettimeofday(&data->meas.comp_tv);
 	ts_msec = stmvl53l1_tv_dif(&data->start_tv, &data->meas.comp_tv)/1000;
 
 	pmrange = &data->meas.multi_range_data;
+	tmprange = &data->meas.tmp_range_data;
 	data->meas.intr++;
 
 	/* use get data method based on active mode */
 	switch (data->preset_mode) {
 	case VL53L1_PRESETMODE_LITE_RANGING:
+	case VL53L1_PRESETMODE_AUTONOMOUS:
 		rc = VL53L1_GetRangingMeasurementData(&data->stdev,
 			&pmrange->RangeData[0]);
+		/* set top level status so we got correct events in input
+		 * subsystem.
+		 */
+		pmrange->RoiNumber = 0;
+		pmrange->RoiStatus = VL53L1_ROISTATUS_VALID_LAST;
+		pmrange->NumberOfObjectsFound = 1;
 	break;
 	case VL53L1_PRESETMODE_RANGING:
-		/* IMPORTANT : during Vl53L1_GetMultiRangingData() call
+	case VL53L1_PRESETMODE_MULTIZONES_SCANNING:
+		/* IMPORTANT : during VL53L1_GetMultiRangingData() call
 		* work_mutex is release during ipp. This is why we use
 		* tmp_range_data which is not access somewhere else. When we are
 		* back we then copy tmp_range_data in multi_range_data.
 		 */
 
-		rc = Vl53L1_GetMultiRangingData(&data->stdev,
+		rc = VL53L1_GetMultiRangingData(&data->stdev,
 			&data->meas.tmp_range_data);
 
-		memcpy(&data->meas.multi_range_data, &data->meas.tmp_range_data,
-			sizeof(VL53L1_MultiRangingData_t));
+		/* be sure we got VL53L1_RANGESTATUS_NONE for object 0 if we got
+		 * invalid roi or no object. So if client read data using
+		 * VL53L1_IOCTL_GETDATAS we got correct status.
+		 */
+		if (tmprange->RoiStatus == VL53L1_ROISTATUS_NOT_VALID ||
+			tmprange->NumberOfObjectsFound == 0)
+			tmprange->RangeData[0].RangeStatus =
+						VL53L1_RANGESTATUS_NONE;
+
+		memcpy(pmrange, tmprange, sizeof(VL53L1_MultiRangingData_t));
 	break;
-	case VL53L1_PRESETMODE_MULTIZONES_SCANNING:
-		/* See VL53L1_PRESETMODE_RANGING for the two step. */
-		rc = Vl53L1_GetMultiRangingData(&data->stdev,
-			&data->meas.tmp_range_data);
-		memcpy(&data->meas.multi_range_data, &data->meas.tmp_range_data,
-			sizeof(VL53L1_MultiRangingData_t));
-		break;
 	default:
 		/* that must be some bug or data corruption stop now */
 		rc = -1;
@@ -1497,11 +2956,6 @@ static void stmvl53l1_on_newdata_event(struct stmvl53l1_data *data)
 		return;
 	}
 	if (rc) {
-		/* FIXME shall we kill current range_data  status ?
-		 * shall we put ourself in "stop" state ?
-		 * what to do if they are too many error :
-		 * stop due to ipp is a special case we shall do nothing
-		 */
 		vl53l1_errmsg("VL53L1_GetRangingMeasurementData @%d %d",
 				__LINE__, rc);
 		data->meas.err_cnt++;
@@ -1516,10 +2970,11 @@ static void stmvl53l1_on_newdata_event(struct stmvl53l1_data *data)
 		return;
 	}
 
-	/* patch time stamp FIXME this may be dependent of mode
-	 * in orde to set per zone time stamp
-	 */
+	/* FIXME: remove when implemented by ll or bare driver */
 	pmrange->RangeData[0].TimeStamp = ts_msec;
+	for (i = 1; i < pmrange->NumberOfObjectsFound; i++)
+		pmrange->RangeData[i].TimeStamp = ts_msec;
+
 	data->meas.cnt++;
 	vl53l1_dbgmsg("#%3d %2d poll ts %5d status=%d obj cnt=%d\n",
 		data->meas.cnt,
@@ -1538,13 +2993,19 @@ static void stmvl53l1_on_newdata_event(struct stmvl53l1_data *data)
 			(int)data->meas.range_data.RangeStatus,
 			(int)data->meas.range_data.RangeMilliMeter);
 #endif
-	/* TODO  ignore first interrupt in case we just started ? */
-
 	/* ready that is not always on each new data event */
+
+	/* mark data as valid from now */
+	data->is_data_valid = true;
+
+	/* wake up sleeping client */
+	wake_up_data_waiters(data);
 
 	/* push data to input susbys and only and make avl for ioctl*/
 	stmvl53l1_input_push_data(data);
-	/* roll time now data got used TODO adapt to per zone */
+	stmvl53l1_insert_flush_events_lock(data);
+
+	/* roll time now data got used */
 	data->meas.start_tv = data->meas.comp_tv;
 	data->meas.poll_cnt = 0;
 	data->meas.err_cnt = 0;
@@ -1573,8 +3034,8 @@ static int stmvl53l1_intr_process(struct stmvl53l1_data *data)
 	if (rc) {
 		vl53l1_errmsg("GetMeasurementDataReady @%d %d, fail\n",
 				__LINE__, rc);
-		/* TODO too many successive fail take action
-		 * FIXME rigth now stop but do not try to do any new i/o
+		/* too many successive fail => stop but do not try to do any new
+		 * i/o
 		 */
 		goto stop_io;
 	}
@@ -1598,12 +3059,23 @@ static int stmvl53l1_intr_process(struct stmvl53l1_data *data)
 		goto done;
 	}
 	/* we have data to handle */
-	stmvl53l1_on_newdata_event(data);
+	/* first irq after reset has no data so we skip it */
+	if (data->is_first_irq)
+		data->is_first_irq = false;
+	else
+		stmvl53l1_on_newdata_event(data);
 	/* enable_sensor could change on event handling check again */
 	if (data->enable_sensor) {
 		/* clear interrupt and continue ranging */
 		work_dbg("intr clr");
+		/* In autonomous mode, bare driver will trigger stop/start
+		 * sequence. In that case it wall call platform delay functions.
+		 * So allow delay in VL53L1_ClearInterruptAndStartMeasurement()
+		 * call.
+		 */
+		data->is_delay_allowed = data->allow_hidden_start_stop;
 		rc = VL53L1_ClearInterruptAndStartMeasurement(&data->stdev);
+		data->is_delay_allowed = 0;
 		if (rc) {
 			/* go to stop but stop any new i/o for dbg */
 			vl53l1_errmsg("Cltr intr restart fail %d\n", rc);
@@ -1613,12 +3085,10 @@ static int stmvl53l1_intr_process(struct stmvl53l1_data *data)
 done:
 	return rc;
 stop_io:
-	/*  TODO too many successive fail take action */
-	/*  FIXME rigth now stop but do not try to do any new i/o
-	 *  like stoping sensor
+	/* too many successive fail take action => stop but do not try to do
+	 * any new i/o
 	 */
 	vl53l1_errmsg("GetDatardy fail stop\n");
-	stmvl53l1_dbg_gpio(data, 0, 1);
 	data->enable_sensor = 0;
 	return rc;
 
@@ -1640,39 +3110,54 @@ static void stmvl53l1_work_handler(struct work_struct *work)
 	mutex_unlock(&data->work_mutex);
 }
 
-static void stmvl53l1_input_push_data(struct stmvl53l1_data *data)
+static void stmvl53l1_input_push_data_object(struct stmvl53l1_data *data,
+	int roi, int obj, stmvl531_range_data_t *meas, int obj_number,
+	VL53L1_RoiStatus RoiStatus)
 {
-	struct timeval tv;
 	struct input_dev *input = data->input_dev_ps;
-	stmvl531_range_data_t *meas = &data->meas.multi_range_data.RangeData[0];
-	VL53L1_Error Status = VL53L1_ERROR_NONE;
 	FixPoint1616_t LimitCheckCurrent;
-	uint8_t status = meas->RangeStatus;
+	VL53L1_Error st = VL53L1_ERROR_NONE;
 
-	/* only push event in mode 1 or 2 */
-	if (data->preset_mode == VL53L1_PRESETMODE_MULTIZONES_SCANNING)
-		return;
-	/* when no objects then still send event but update status */
-	if (data->preset_mode == VL53L1_PRESETMODE_RANGING &&
-		data->meas.multi_range_data.NumberOfObjectsFound == 0)
-		status = VL53L1_RANGESTATUS_NONE;
+	/* set the distance value to max if range
+	 * status is invalid in autonomous mode */
+	if (data->preset_mode == VL53L1_PRESETMODE_AUTONOMOUS &&
+		meas->RangeStatus != VL53L1_RANGESTATUS_RANGE_VALID)
+		meas->RangeMilliMeter = STMVL53L1_MAX_DISTANCE;
 
-	do_gettimeofday(&tv);
 	input_report_abs(input, ABS_DISTANCE, (meas->RangeMilliMeter + 5) / 10);
-	input_report_abs(input, ABS_HAT0X, tv.tv_sec);
-	input_report_abs(input, ABS_HAT0Y, tv.tv_usec);
+	input_report_abs(input, ABS_HAT0X, meas->TimeStamp / 1000);
+	input_report_abs(input, ABS_HAT0Y, (meas->TimeStamp % 1000) * 1000);
 	input_report_abs(input, ABS_HAT1X, meas->RangeMilliMeter);
-	input_report_abs(input, ABS_HAT1Y, status);
+	input_report_abs(input, ABS_HAT1Y, meas->RangeStatus);
 	input_report_abs(input, ABS_HAT2X, meas->SignalRateRtnMegaCps);
 	input_report_abs(input, ABS_HAT2Y, meas->AmbientRateRtnMegaCps);
-	input_report_abs(input, ABS_HAT3X, 0/*meas->MeasurementTimeUsec*/);
+	input_report_abs(input, ABS_HAT3X, meas->SigmaMilliMeter);
 	input_report_abs(input, ABS_HAT3Y, meas->DmaxMilliMeter);
-	Status = VL53L1_GetLimitCheckCurrent(&data->stdev,
+	st = VL53L1_GetLimitCheckCurrent(&data->stdev,
 		VL53L1_CHECKENABLE_SIGMA_FINAL_RANGE, &LimitCheckCurrent);
-	if (Status == VL53L1_ERROR_NONE)
+	if (st == VL53L1_ERROR_NONE)
 		input_report_abs(input, ABS_WHEEL, LimitCheckCurrent);
-	input_report_abs(input, ABS_PRESSURE, meas->EffectiveSpadRtnCount);
-	input_sync(data->input_dev_ps);
+	input_report_abs(input, ABS_MISC, meas->EffectiveSpadRtnCount);
+	input_report_abs(input, ABS_BRAKE, (RoiStatus << 24) | (roi << 16) |
+		(obj_number << 8) | obj);
+	input_report_abs(input, ABS_TILT_X, (meas->RangeMaxMilliMeter << 16) |
+		meas->RangeMinMilliMeter);
+	input_report_abs(input, ABS_TOOL_WIDTH, meas->RangeQualityLevel);
+
+	input_sync(input);
+}
+
+static void stmvl53l1_input_push_data(struct stmvl53l1_data *data)
+{
+	VL53L1_MultiRangingData_t *meas = &data->meas.multi_range_data;
+	int obj_number = meas->NumberOfObjectsFound;
+	int i;
+
+	/* be sure threre is at least one object */
+	obj_number = obj_number ? obj_number : 1;
+	for (i = 0; i < obj_number; i++)
+		stmvl53l1_input_push_data_object(data, meas->RoiNumber, i,
+			&meas->RangeData[i], obj_number, meas->RoiStatus);
 }
 
 static int stmvl53l1_input_setup(struct stmvl53l1_data *data)
@@ -1702,29 +3187,30 @@ static int stmvl53l1_input_setup(struct stmvl53l1_data *data)
 	input_set_abs_params(idev, ABS_HAT2X, 0, 0xffffffff, 0, 0);
 	/* rtn_amb_rate */
 	input_set_abs_params(idev, ABS_HAT2Y, 0, 0xffffffff, 0, 0);
-	/* rtn_conv_time */
+	/* SigmaMilliMeter */
 	input_set_abs_params(idev, ABS_HAT3X, 0, 0xffffffff, 0, 0);
 	/* dmax */
 	input_set_abs_params(idev, ABS_HAT3Y, 0, 0xffffffff, 0, 0);
-
-	input_set_abs_params(idev, ABS_PRESSURE, 0, 0xffffffff,	0, 0);
+	/* LimitCheckCurrent*/
 	input_set_abs_params(idev, ABS_WHEEL, 0, 0xffffffff, 0, 0);
+	/* EffectiveSpadRtnCount */
+	input_set_abs_params(idev, ABS_MISC, 0, 0xffffffff, 0, 0);
+	/* roi number in 16 msb bits with object number in 16 lsb bits */
+	input_set_abs_params(idev, ABS_BRAKE, 0, 0xffffffff, 0, 0);
+	/* RangeMaxMilliMeter in 16 msb bits with RangeMinMilliMeter in lsb */
+	input_set_abs_params(idev, ABS_TILT_X, 0, 0xffffffff, 0, 0);
+	/* ConfidenceLevel */
+	input_set_abs_params(idev, ABS_TOOL_WIDTH, 0, 0xffffffff, 0, 0);
+
+	/* flushCount */
 	input_set_abs_params(idev, ABS_GAS, 0, 0xffffffff, 0, 0);
 
-#if 0
-	/* add by michel for more fields */
-	input_set_abs_params(idev, ABS_BRAKE, 0, 0xffffffff, 0, 0);
-	input_set_abs_params(idev, ABS_RUDDER, 0, 0xffffffff, 0, 0);
-	input_set_abs_params(idev, ABS_TILT_X, 0, 0xffffffff, 0, 0);
+	/* those are still free to use
+	 * input_set_abs_params(idev, ABS_RUDDER, 0, 0xffffffff, 0, 0);
+	 * input_set_abs_params(idev, ABS_TILT_Y, 0, 0xffffffff, 0, 0);
+	*/
 
-	input_set_abs_params(idev, ABS_TILT_Y, 0, 0xffffffff, 0, 0);
-	input_set_abs_params(idev, ABS_TOOL_WIDTH, 0, 0xffffffff, 0, 0);
-#endif
-
-	idev->name = "STM VL53L1 proximity sensor";
-	/* TODO as soon as dev is available we shall be locked or we can
-	 *already have races
-	 */
+	idev->name = VL53L1_INPUT_DEVICE_NAME;
 	rc = input_register_device(idev);
 	if (rc) {
 		rc = -ENOMEM;
@@ -1743,21 +3229,6 @@ exit_err:
 	return rc;
 }
 
-static void stmvl53l1_flush_work_handler(struct work_struct *work)
-{
-	struct stmvl53l1_data *data = container_of(work,
-		struct stmvl53l1_data, flush_work.work);
-
-	mutex_lock(&data->work_mutex);
-
-	data->flushCount++;
-	input_report_abs(data->input_dev_ps, ABS_GAS, data->flushCount);
-	input_sync(data->input_dev_ps);
-	vl53l1_dbgmsg("Sensor HAL Flush Count = %u\n", data->flushCount);
-
-	mutex_unlock(&data->work_mutex);
-}
-
 /**
  * handler to be called by interface module on interrupt
  *
@@ -1772,22 +3243,20 @@ int stmvl53l1_intr_handler(struct stmvl53l1_data *data)
 	int rc;
 
 	mutex_lock(&data->work_mutex);
-	if (!data->poll_mode) {
-		/* handle it only if if we are not stopped */
-		if (data->enable_sensor) {
-			rc = stmvl53l1_intr_process(data);
-		} else {
-			/* it's likely race/last unhandled interrupt after
-			 * stop
-			 */
-			vl53l1_dbgmsg("got intr but on\n");
-			rc = 0;
-		}
+
+	/* handle it only if if we are not stopped */
+	if (data->enable_sensor) {
+		rc = stmvl53l1_intr_process(data);
 	} else {
-	/* module is asking us to do intr but we are in poll mode ignore it*/
-		vl53l1_dbgmsg("intr but in poll mode");
+		/* it's likely race/last unhandled interrupt after
+		 * stop.
+		 * Such dummy irq also occurred during offset and crosstalk
+		 * calibration procedures.
+		 */
+		vl53l1_dbgmsg("got intr but not on (dummy or calibration)\n");
 		rc = 0;
 	}
+
 	mutex_unlock(&data->work_mutex);
 	return rc;
 }
@@ -1804,22 +3273,19 @@ int stmvl53l1_intr_handler(struct stmvl53l1_data *data)
 int stmvl53l1_setup(struct stmvl53l1_data *data)
 {
 	int rc = 0;
+	VL53L1_CalibrationData_t cali_data;
 	VL53L1_DeviceInfo_t dev_info;
-
-#ifdef USE_INT
-	int irq = 0;
-#endif
 
 	vl53l1_dbgmsg("Enter\n");
 
+	data->hw_rev = 0;
+
 	/* acquire an id */
-	data->id = atomic_add_return(1, &dev_id);
-	if (data->id > STMVL53L1_CFG_MAX_DEV) {
-		vl53l1_errmsg("id %d too many device already created\n",
-				data->id);
+	data->id = allocate_dev_id();
+	if (data->id < 0) {
+		vl53l1_errmsg("too many device already created");
 		return -1;
 	}
-	data->id--;
 	vl53l1_dbgmsg("Dev id %d is @%p\n", data->id, data);
 	stmvl53l1_dev_table[data->id] = data;
 
@@ -1827,54 +3293,32 @@ int stmvl53l1_setup(struct stmvl53l1_data *data)
 	/* mutex_init(&data->update_lock); */
 	mutex_init(&data->work_mutex);
 
-#ifdef USE_INT
-	/* init interrupt */
-	gpio_request(IRQ_NUM, "vl53l0_gpio_int");
-	gpio_direction_input(IRQ_NUM);
-	irq = gpio_to_irq(IRQ_NUM);
-	if (irq < 0) {
-		vl53l0_errmsg("filed to map GPIO: %d to interrupt:%d\n",
-			IRQ_NUM, irq);
-	} else {
-		vl53l0_dbgmsg("register_irq:%d\n", irq);
-		/* IRQF_TRIGGER_FALLING- poliarity:0 IRQF_TRIGGER_RISNG -
-		 * poliarty:1
-		 */
-		rc = request_threaded_irq(irq, NULL,
-				stmvl53l0_interrupt_handler,
-				IRQF_TRIGGER_FALLING|IRQF_ONESHOT,
-				"vl53l0_interrupt",
-				(void *)data);
-		if (rc) {
-			vl53l0_errmsg(
-"%d, Could not allocate STMVL53L0_INT ! result:%d\n",  __LINE__, rc);
-			free_irq(irq, data);
-			goto exit_free_irq;
-		}
-	}
-	data->irq = irq;
-	vl53l0_errmsg("interrupt is hooked\n");
-#else
-	/* TODO No interrupt */
-#endif
-
 	/* init work handler */
 	INIT_DELAYED_WORK(&data->dwork, stmvl53l1_work_handler);
 
 	/* init ipp side */
 	stmvl53l1_ipp_setup(data);
 
-	rc = stmvl53l1_module_func_tbl.power_up(data->client_object,
-			&data->reset);
-	if (rc) {
-		vl53l1_errmsg("%d,error rc %d\n", __LINE__, rc);
-		goto exit_free_irq;
-	}
+	data->force_device_on_en = force_device_on_en_default;
+	data->reset_state = 1;
+	data->is_calibrating = false;
+	data->last_error = VL53L1_ERROR_NONE;
+	data->is_device_remove = false;
+
+	/* vdd will be controlled in reset_release() */
+	rc = reset_release(data);
+	if (rc)
+		goto exit_ipp_cleanup;
 
 	rc = stmvl53l1_input_setup(data);
 	if (rc)
-		goto exit_free_irq;
-	INIT_DELAYED_WORK(&data->flush_work, stmvl53l1_flush_work_handler);
+		goto exit_ipp_cleanup;
+
+	/* init blocking ioctl stuff */
+	INIT_LIST_HEAD(&data->simple_data_reader_list);
+	INIT_LIST_HEAD(&data->mz_data_reader_list);
+	init_waitqueue_head(&data->waiter_for_data);
+	data->is_data_valid = false;
 
 	/* Register sysfs hooks under input dev */
 	rc = sysfs_create_group(&data->input_dev_ps->dev.kobj,
@@ -1890,27 +3334,94 @@ int stmvl53l1_setup(struct stmvl53l1_data *data)
 	data->poll_delay_ms = STMVL53L1_CFG_POLL_DELAY_MS;
 	data->timing_budget = STMVL53L1_CFG_TIMING_BUDGET_US;
 	data->preset_mode = STMVL53L1_CFG_DEFAULT_MODE;
+	data->distance_mode = STMVL53L1_CFG_DEFAULT_DISTANCE_MODE;
+	data->crosstalk_enable = STMVL53L1_CFG_DEFAULT_CROSSTALK_ENABLE;
+	data->output_mode = STMVL53L1_CFG_DEFAULT_OUTPUT_MODE;
+	data->cam_mode = 0;
+	data->sar_mode = 0;
+	stmvl53l1_setup_auto_config(data);
+
+	data->is_delay_allowed = true;
+	/* need to be done once */
 	rc = VL53L1_DataInit(&data->stdev);
+	data->is_delay_allowed = false;
 	if (rc) {
 		vl53l1_errmsg("VL53L1_data_init %d\n", rc);
-		/*goto exit_unregister_dev_ps;*/
+		goto exit_unregister_dev_ps;
 	}
 
 	rc = VL53L1_GetDeviceInfo(&data->stdev, &dev_info);
 	if (rc) {
 		vl53l1_errmsg("VL53L1_GetDeviceInfo %d\n", rc);
-		/*goto exit_unregister_dev_ps;*/
+		goto exit_unregister_dev_ps;
 	}
-	vl53l1_errmsg("device name %s\ntype %s\n",
-			dev_info.Name, dev_info.Type);
+	vl53l1_errmsg("device Product type 0x%x name %s\ntype %s\n",
+			dev_info.ProductType, dev_info.Name, dev_info.Type);
 
-/* TODO for dev test  many load/unlaod driver wan't work need better reset
- * looking at dev "fresh reset" or forcing s/w reset could help
- */
-	/* when we have no reset control we must still do the
-	 * one time reset things once so set this at first
-	 */
-	data->reset = 1;
+	data->hw_rev = dev_info.ProductRevisionMinor;
+
+	memset(&cali_data, 0, sizeof(cali_data));
+	rc = VL53L1_GetCalibrationData(&data->stdev, &cali_data);
+	if (rc)
+		vl53l1_errmsg("VL53L1_GetCalibrationData fail\n");
+	else {
+		data->inner_offset = cali_data.customer.mm_config__inner_offset_mm;
+		data->outer_offset = cali_data.customer.mm_config__outer_offset_mm;
+
+		/* update xtalk values */
+		cali_data.customer.algo__crosstalk_compensation_plane_offset_kcps
+			= data->xtalk_offset;
+		cali_data.customer.algo__crosstalk_compensation_x_plane_gradient_kcps
+			= data->xtalk_x;
+		cali_data.customer.algo__crosstalk_compensation_y_plane_gradient_kcps
+			= data->xtalk_y;
+
+		cali_data.xtalkhisto.xtalk_shape.VL53L1_PRM_00015    = 0 ;
+		cali_data.xtalkhisto.xtalk_shape.VL53L1_PRM_00016    = 24;
+		cali_data.xtalkhisto.xtalk_shape.VL53L1_PRM_00017    = 12;
+		cali_data.xtalkhisto.xtalk_shape.bin_data[0]    = 353;
+		cali_data.xtalkhisto.xtalk_shape.bin_data[1]    = 472;
+		cali_data.xtalkhisto.xtalk_shape.bin_data[2]    = 472;
+		cali_data.xtalkhisto.xtalk_shape.bin_data[3]    = 353;
+		cali_data.xtalkhisto.xtalk_shape.bin_data[4] 	  = 0;
+		cali_data.xtalkhisto.xtalk_shape.bin_data[5]    = 0;
+		cali_data.xtalkhisto.xtalk_shape.bin_data[6]    = 0;
+		cali_data.xtalkhisto.xtalk_shape.bin_data[7]    = 0;
+		cali_data.xtalkhisto.xtalk_shape.bin_data[8]    = 0;
+		cali_data.xtalkhisto.xtalk_shape.bin_data[9]    = 0;
+		cali_data.xtalkhisto.xtalk_shape.bin_data[10]   = 0;
+		cali_data.xtalkhisto.xtalk_shape.bin_data[11]   = 0;
+		cali_data.xtalkhisto.xtalk_shape.phasecal_result__reference_phase = 10240;
+		cali_data.xtalkhisto.xtalk_shape.phasecal_result__vcsel_start     = 6;
+		cali_data.xtalkhisto.xtalk_shape.cal_config__vcsel_start          = 9;
+		cali_data.xtalkhisto.xtalk_shape.vcsel_width                      = 40;
+		cali_data.xtalkhisto.xtalk_shape.VL53L1_PRM_00018                 = 48332;
+		cali_data.xtalkhisto.xtalk_shape.zero_distance_phase              = 4096;
+		cali_data.gain_cal.standard_ranging_gain_factor = 0x07D7;
+		cali_data.gain_cal.histogram_ranging_gain_factor = 0x07CC;
+
+		rc = VL53L1_SetCalibrationData(&data->stdev, &cali_data);
+		if (rc)
+			vl53l1_errmsg("VL53L1_SetCalibrationData fail\n");
+		else {
+			vl53l1_info("device xtalk data updated: %u %d %d\n",
+                    cali_data.customer.algo__crosstalk_compensation_plane_offset_kcps,
+                    cali_data.customer.algo__crosstalk_compensation_x_plane_gradient_kcps,
+                    cali_data.customer.algo__crosstalk_compensation_y_plane_gradient_kcps);
+		}
+	}
+
+	/* if working in interrupt ask intr to enable and hook the handler */
+	data->poll_mode = 0;
+	rc = stmvl53l1_module_func_tbl.start_intr(data->client_object,
+		&data->poll_mode);
+	if (rc < 0) {
+		vl53l1_errmsg("can't start no  intr\n");
+		goto exit_unregister_dev_ps;
+	}
+
+	data->is_first_irq = true;
+	data->is_delay_allowed = false;
 
 	/* to register as a misc device */
 	data->miscdev.minor = MISC_DYNAMIC_MINOR;
@@ -1928,19 +3439,16 @@ int stmvl53l1_setup(struct stmvl53l1_data *data)
 		vl53l1_errmsg("misc dev reg fail\n");
 		goto exit_unregister_dev_ps;
 	}
-	rc = stmvl53l1_dbg_init(data);
-	if (rc != 0)
-		vl53l1_errmsg("dbg init fail\n");
-		/* this is not killer  still ok to run w/o dbg io*/
+	/* bring back device under reset */
+	reset_hold(data);
+
 	return 0;
+
 exit_unregister_dev_ps:
 	input_unregister_device(data->input_dev_ps);
-exit_free_irq:
-#ifdef USE_INT
-	free_irq(irq, data);
-#endif
+exit_ipp_cleanup:
 	stmvl53l1_ipp_cleanup(data);
-	kfree(data);
+
 	return rc;
 }
 
@@ -1950,13 +3458,10 @@ void stmvl53l1_cleanup(struct stmvl53l1_data *data)
 int rc;
 
 	vl53l1_dbgmsg("enter\n");
-	mutex_lock(&data->work_mutex);
 	rc = _ctrl_stop(data);
 	if (rc < 0)
 		vl53l1_errmsg("stop failed %d aborting anyway\n", rc);
 
-	vl53l1_dbgmsg("cancel flush work queue\n");
-	cancel_delayed_work(&data->flush_work);
 	if (data->input_dev_ps) {
 		vl53l1_dbgmsg("to remove sysfs group\n");
 		sysfs_remove_group(&data->input_dev_ps->dev.kobj,
@@ -1971,10 +3476,27 @@ int rc;
 		vl53l1_dbgmsg("to unregister misc dev\n");
 		misc_deregister(&data->miscdev);
 	}
-	stmvl53l1_dbg_fini(data);
 	stmvl53l1_ipp_cleanup(data);
+	/* be sure device is put under reset */
+	data->force_device_on_en = false;
+	reset_hold(data);
 	vl53l1_dbgmsg("done\n");
+	deallocate_dev_id(data->id);
+	data->is_device_remove = true;
 }
+
+#ifdef CONFIG_COMPAT
+static long stmvl53l1_compat_ioctl(struct file *file,
+		unsigned int cmd, unsigned long arg)
+{
+	int ret;
+	struct stmvl53l1_data *data =
+			container_of(file->private_data,
+			struct stmvl53l1_data, miscdev);
+	ret = stmvl53l1_ioctl_handler(data, cmd, arg, compat_ptr(arg));
+	return ret;
+}
+#endif
 
 static long stmvl53l1_ioctl(struct file *file,
 		unsigned int cmd, unsigned long arg){
@@ -1993,19 +3515,13 @@ static int __init stmvl53l1_init(void)
 	vl53l1_dbgmsg("Enter\n");
 
 	rc = stmvl53l1_ipp_init();
-	if (rc) {
-		vl53l1_dbgmsg("fail to init netlink ipp\n");
-		/* FIXME => fix stmvl53l1_ipp_init() so it return negative
-		 *value
-		 */
-		if (rc > 0)
-			rc = -rc;
+	if (rc)
 		goto done;
-	}
 	/* i2c/cci client specific init function */
 	rc = stmvl53l1_module_func_tbl.init();
 done:
 	vl53l1_dbgmsg("End %d\n", rc);
+
 	return rc;
 }
 

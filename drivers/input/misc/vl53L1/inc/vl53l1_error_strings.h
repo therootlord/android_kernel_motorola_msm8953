@@ -2,7 +2,8 @@
 /*
 * Copyright (c) 2016, STMicroelectronics - All Rights Reserved
 *
-* This file is part of VL53L1 Core and is dual licensed, either 'STMicroelectronics Proprietary license'
+* This file is part of VL53L1 Core and is dual licensed, either 'STMicroelectronics
+* Proprietary license'
 * or 'BSD 3-clause "New" or "Revised" License' , at your option.
 *
 ********************************************************************************
@@ -11,7 +12,8 @@
 *
 ********************************************************************************
 *
-* License terms: STMicroelectronics Proprietary in accordance with licensing terms at www.st.com/sla0044
+* License terms: STMicroelectronics Proprietary in accordance with licensing
+* terms at www.st.com/sla0044
 *
 * STMicroelectronics confidential
 * Reproduction and Communication of this document is strictly prohibited unless
@@ -21,7 +23,8 @@
 ********************************************************************************
 *
 * Alternatively, VL53L1 Core may be distributed under the terms of
-* 'BSD 3-clause "New" or "Revised" License', in which case the following provisions apply instead of the ones
+* 'BSD 3-clause "New" or "Revised" License', in which case the following
+* provisions apply instead of the ones
 * mentioned above :
 *
 ********************************************************************************
@@ -169,17 +172,58 @@ VL53L1_Error VL53L1_get_pal_error_string(
 	#define  VL53L1_STRING_ERROR_ZONE_GPH_ID_CHECK_FAIL \
 			"Zone GPH ID Check Fail - API out of sync"
 
+	#define  VL53L1_STRING_ERROR_XTALK_EXTRACTION_NO_SAMPLES_FAIL \
+			"No Xtalk using full array - Xtalk Extract Fail"
+	#define  VL53L1_STRING_ERROR_XTALK_EXTRACTION_SIGMA_LIMIT_FAIL \
+			"Xtalk does not meet required VL53L1_PRM_00012 limit - Xtalk Extract Fail"
+
+	#define  VL53L1_STRING_ERROR_OFFSET_CAL_NO_SAMPLE_FAIL \
+		"Offset Cal - one of more stages with no valid samples - fatal"
+	#define  VL53L1_STRING_ERROR_OFFSET_CAL_NO_SPADS_ENABLED_FAIL \
+		"Offset Cal - one of more stages with no SPADS enables - fatal"
+	#define  VL53L1_STRING_ERROR_ZONE_CAL_NO_SAMPLE_FAIL \
+		"Zone Cal - one of more zones with no valid samples - fatal"
+
+	#define  VL53L1_STRING_WARNING_REF_SPAD_CHAR_NOT_ENOUGH_SPADS \
+		"Ref SPAD Char - Not Enough Good SPADs"
+	#define  VL53L1_STRING_WARNING_REF_SPAD_CHAR_RATE_TOO_HIGH \
+		"Ref SPAD Char - Final Ref Rate too high"
+	#define  VL53L1_STRING_WARNING_REF_SPAD_CHAR_RATE_TOO_LOW \
+		"Ref SPAD Char - Final Ref Rate too low"
+
+	#define  VL53L1_STRING_WARNING_OFFSET_CAL_MISSING_SAMPLES \
+		"Offset Cal - Less than the requested number of valid samples"
+	#define  VL53L1_STRING_WARNING_OFFSET_CAL_SIGMA_TOO_HIGH \
+		"Offset Cal - Sigma estimate value too high - offset not stable"
+	#define  VL53L1_STRING_WARNING_OFFSET_CAL_RATE_TOO_HIGH \
+		"Offset Cal - Rate too high - in pile up"
+	#define  VL53L1_STRING_WARNING_OFFSET_CAL_SPAD_COUNT_TOO_LOW \
+		"Offset Cal - Insufficient SPADs - offset may not be stable"
+
+	#define  VL53L1_STRING_WARNING_ZONE_CAL_MISSING_SAMPLES \
+		"Zone Cal - One or more zone with less than requested valid samples"
+	#define  VL53L1_STRING_WARNING_ZONE_CAL_SIGMA_TOO_HIGH \
+		"Zone Cal - One of more zones the VL53L1_PRM_00012 estimate too high"
+	#define  VL53L1_STRING_WARNING_ZONE_CAL_RATE_TOO_HIGH \
+		"Zone Cal - One of more zones with rate too high - in pile up"
+
+	#define  VL53L1_STRING_WARNING_XTALK_NO_SAMPLES_FOR_GRADIENT \
+			"Xtalk - Gradient sample num = 0"
+	#define  VL53L1_STRING_WARNING_XTALK_SIGMA_LIMIT_FOR_GRADIENT \
+			"Xtalk - Gradient Sigma > Limit"
+	#define  VL53L1_STRING_WARNING_XTALK_MISSING_SAMPLES \
+			"Xtalk - Some missing and invalid samples"
 
 	#define  VL53L1_STRING_ERROR_DEVICE_FIRMWARE_TOO_OLD \
 			"Device Firmware too old"
 	#define  VL53L1_STRING_ERROR_DEVICE_FIRMWARE_TOO_NEW \
 			"Device Firmware too new"
 	#define  VL53L1_STRING_ERROR_UNIT_TEST_FAIL \
-	        "Unit Test Fail"
+			"Unit Test Fail"
 	#define  VL53L1_STRING_ERROR_FILE_READ_FAIL \
-        	"File Read Fail"
+			"File Read Fail"
 	#define  VL53L1_STRING_ERROR_FILE_WRITE_FAIL \
-        	"File Write Fail"
+			"File Write Fail"
 
 	#define  VL53L1_STRING_ERROR_NOT_IMPLEMENTED \
 			"Not implemented error"
@@ -195,4 +239,5 @@ VL53L1_Error VL53L1_get_pal_error_string(
 #endif
 
 #endif
+
 

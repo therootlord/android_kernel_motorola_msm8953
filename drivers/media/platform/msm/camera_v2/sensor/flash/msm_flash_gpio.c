@@ -26,6 +26,7 @@ enum msm_flash_driver_type flash_type_gpio = FLASH_DRIVER_DEFAULT;
 DEFINE_MSM_MUTEX(msm_flash_mutex);
 
 static struct v4l2_file_operations msm_flash_v4l2_subdev_fops;
+static DEFINE_MUTEX(flash_lock);
 
 static const struct of_device_id msm_flash_dt_match[] = {
 	{.compatible = "qcom,camera-led-flash", .data = NULL},
@@ -44,7 +45,22 @@ static int32_t msm_flash_init_gpio_pin_tbl(struct device_node *of_node,
 		rc = -ENOMEM;
 		return rc;
 	}
-
+	rc = of_property_read_u32(of_node, "qcom,gpio-flash-now", &val);
+	if (rc < 0) {
+		pr_err("%s:%d read qcom,gpio-flash-now failed rc %d\n",
+			__func__, __LINE__, rc);
+	} else if (val > gpio_array_size) {
+		pr_err("%s:%d qcom,gpio-flash-now invalid %d\n",
+			__func__, __LINE__, val);
+		goto ERROR;
+	} else if (rc == 0) {
+	/*index 1 is for qcom,gpio-flash-now */
+	gconf->gpio_num_info->gpio_num[1] =
+		gpio_array[val];
+	gconf->gpio_num_info->valid[1] = 1;
+	CDBG("%s qcom,gpio-flash-now %d\n", __func__,
+		gconf->gpio_num_info->gpio_num[1]);
+	}
 	rc = of_property_read_u32(of_node, "qcom,gpio-flash-en", &val);
 	if (rc < 0) {
 		pr_err("%s:%d read qcom,gpio-flash-en failed rc %d\n",
@@ -54,31 +70,14 @@ static int32_t msm_flash_init_gpio_pin_tbl(struct device_node *of_node,
 		pr_err("%s:%d qcom,gpio-flash-en invalid %d\n",
 			__func__, __LINE__, val);
 		goto ERROR;
-	}
+	}  else if (rc == 0) {
 	/*index 0 is for qcom,gpio-flash-en */
 	gconf->gpio_num_info->gpio_num[0] =
 		gpio_array[val];
 	gconf->gpio_num_info->valid[0] = 1;
 	CDBG("%s qcom,gpio-flash-en %d\n", __func__,
 		gconf->gpio_num_info->gpio_num[0]);
-
-	rc = of_property_read_u32(of_node, "qcom,gpio-flash-now", &val);
-	if (rc < 0) {
-		pr_err("%s:%d read qcom,gpio-flash-now failed rc %d\n",
-			__func__, __LINE__, rc);
-		goto ERROR;
-	} else if (val > gpio_array_size) {
-		pr_err("%s:%d qcom,gpio-flash-now invalid %d\n",
-			__func__, __LINE__, val);
-		goto ERROR;
 	}
-	/*index 1 is for qcom,gpio-flash-now */
-	gconf->gpio_num_info->gpio_num[1] =
-		gpio_array[val];
-	gconf->gpio_num_info->valid[1] = 1;
-	CDBG("%s qcom,gpio-flash-now %d\n", __func__,
-		gconf->gpio_num_info->gpio_num[1]);
-
 	return rc;
 
 ERROR:
@@ -169,12 +168,12 @@ static int32_t msm_flash_off(struct msm_flash_ctrl_t *flash_ctrl,
 	CDBG("%s:%d called\n", __func__, __LINE__);
 
 	if (power_info->gpio_conf->gpio_num_info->valid[0] == 1) {
-		gpio_set_value_cansleep(
+		gpio_set_value(
 		power_info->gpio_conf->gpio_num_info->gpio_num[0],
 		GPIO_OUT_LOW);
 	}
 	if (power_info->gpio_conf->gpio_num_info->valid[1] == 1) {
-		gpio_set_value_cansleep(
+		gpio_set_value(
 		power_info->gpio_conf->gpio_num_info->gpio_num[1],
 		GPIO_OUT_LOW);
 	}
@@ -241,6 +240,7 @@ static int32_t msm_flash_low(
 	struct msm_flash_cfg_data_t *flash_data)
 {
 	struct msm_camera_power_ctrl_t *power_info = NULL;
+	static int32_t i;
 
 	CDBG("%s:%d called\n", __func__, __LINE__);
 
@@ -249,17 +249,25 @@ static int32_t msm_flash_low(
 	if (power_info->gpio_conf->cam_gpiomux_conf_tbl != NULL)
 		pr_err("%s:%d mux install\n", __func__, __LINE__);
 
+	mutex_lock(&flash_lock);
 	if (power_info->gpio_conf->gpio_num_info->valid[0] == 1) {
-		gpio_set_value_cansleep(
+		gpio_set_value(
 		power_info->gpio_conf->gpio_num_info->gpio_num[0],
 		GPIO_OUT_HIGH);
-		CDBG("%s:%d set flash en HIGH\n", __func__, __LINE__);
+		for (i = 0 ; i <= 14 ; i++) {
+			gpio_set_value(
+			power_info->gpio_conf->gpio_num_info->gpio_num[0],
+			GPIO_OUT_LOW);
+			gpio_set_value(
+			power_info->gpio_conf->gpio_num_info->gpio_num[0],
+			GPIO_OUT_HIGH);
+		}
 	}
+	mutex_unlock(&flash_lock);
 	if (power_info->gpio_conf->gpio_num_info->valid[1] == 1) {
-		gpio_set_value_cansleep(
+		gpio_set_value(
 		power_info->gpio_conf->gpio_num_info->gpio_num[1],
 		GPIO_OUT_LOW);
-		CDBG("%s:%d set flash now LOW\n", __func__, __LINE__);
 	}
 
 	CDBG("Exit\n");
@@ -272,6 +280,7 @@ static int32_t msm_flash_high(
 {
 
 	struct msm_camera_power_ctrl_t *power_info = NULL;
+	static int32_t i;
 
 	CDBG("%s:%d called\n", __func__, __LINE__);
 
@@ -280,17 +289,25 @@ static int32_t msm_flash_high(
 	if (power_info->gpio_conf->cam_gpiomux_conf_tbl != NULL)
 		pr_err("%s:%d mux install\n", __func__, __LINE__);
 
+	mutex_lock(&flash_lock);
 	if (power_info->gpio_conf->gpio_num_info->valid[0] == 1) {
-		gpio_set_value_cansleep(
+		gpio_set_value(
 		power_info->gpio_conf->gpio_num_info->gpio_num[0],
 		GPIO_OUT_HIGH);
-		CDBG("%s:%d set flash en HIGH\n", __func__, __LINE__);
+		for (i = 0 ; i <= 10 ; i++) {
+			gpio_set_value(
+			power_info->gpio_conf->gpio_num_info->gpio_num[0],
+			GPIO_OUT_LOW);
+			gpio_set_value(
+			power_info->gpio_conf->gpio_num_info->gpio_num[0],
+			GPIO_OUT_HIGH);
+		}
 	}
+	mutex_unlock(&flash_lock);
 	if (power_info->gpio_conf->gpio_num_info->valid[1] == 1) {
-		gpio_set_value_cansleep(
+		gpio_set_value(
 		power_info->gpio_conf->gpio_num_info->gpio_num[1],
 		GPIO_OUT_HIGH);
-		CDBG("%s:%d set flash now HIGH\n", __func__, __LINE__);
 	}
 
 	CDBG("Exit\n");
@@ -317,13 +334,13 @@ static int32_t msm_flash_release(
 		pr_err("%s:%d mux install\n", __func__, __LINE__);
 
 	if (power_info->gpio_conf->gpio_num_info->valid[0] == 1) {
-		gpio_set_value_cansleep(
+		gpio_set_value(
 		power_info->gpio_conf->gpio_num_info->gpio_num[0],
 		GPIO_OUT_LOW);
 		CDBG("%s:%d set flash en LOW\n", __func__, __LINE__);
 	}
 	if (power_info->gpio_conf->gpio_num_info->valid[1] == 1) {
-		gpio_set_value_cansleep(
+		gpio_set_value(
 		power_info->gpio_conf->gpio_num_info->gpio_num[1],
 		GPIO_OUT_LOW);
 		CDBG("%s:%d set flash en LOW\n", __func__, __LINE__);

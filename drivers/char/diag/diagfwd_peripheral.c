@@ -1,4 +1,4 @@
-/* Copyright (c) 2015-2016, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2015-2017, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -655,7 +655,7 @@ void diagfwd_close_transport(uint8_t transport, uint8_t peripheral)
 	DIAG_LOG(DIAG_DEBUG_PERIPHERALS,
 		"closed transport for trasnport type %d peripheral %d\n",
 		transport_open, peripheral);
-	mutex_lock(&driver->diagfwd_channel_mutex);
+	mutex_lock(&driver->diagfwd_channel_mutex[peripheral]);
 	fwd_info = &early_init_info[transport][peripheral];
 	if (fwd_info->p_ops && fwd_info->p_ops->close)
 		fwd_info->p_ops->close(fwd_info->ctxt);
@@ -680,7 +680,7 @@ void diagfwd_close_transport(uint8_t transport, uint8_t peripheral)
 		diagfwd_late_open(dest_info);
 	diagfwd_cntl_open(dest_info);
 	init_fn(peripheral);
-	mutex_unlock(&driver->diagfwd_channel_mutex);
+	mutex_unlock(&driver->diagfwd_channel_mutex[peripheral]);
 	diagfwd_queue_read(&peripheral_info[TYPE_DATA][peripheral]);
 	diagfwd_queue_read(&peripheral_info[TYPE_CMD][peripheral]);
 }
@@ -940,6 +940,8 @@ void diagfwd_channel_read(struct diagfwd_info *fwd_info)
 	}
 
 	if (fwd_info->buf_1 && !atomic_read(&fwd_info->buf_1->in_busy)) {
+		temp_buf = fwd_info->buf_1;
+		atomic_set(&temp_buf->in_busy, 1);
 		if (driver->feature[fwd_info->peripheral].encode_hdlc &&
 		    (fwd_info->type == TYPE_DATA ||
 		     fwd_info->type == TYPE_CMD)) {
@@ -949,11 +951,9 @@ void diagfwd_channel_read(struct diagfwd_info *fwd_info)
 			read_buf = fwd_info->buf_1->data;
 			read_len = fwd_info->buf_1->len;
 		}
-		if (read_buf) {
-			temp_buf = fwd_info->buf_1;
-			atomic_set(&temp_buf->in_busy, 1);
-		}
 	} else if (fwd_info->buf_2 && !atomic_read(&fwd_info->buf_2->in_busy)) {
+		temp_buf = fwd_info->buf_2;
+		atomic_set(&temp_buf->in_busy, 1);
 		if (driver->feature[fwd_info->peripheral].encode_hdlc &&
 		    (fwd_info->type == TYPE_DATA ||
 		     fwd_info->type == TYPE_CMD)) {
@@ -962,10 +962,6 @@ void diagfwd_channel_read(struct diagfwd_info *fwd_info)
 		} else {
 			read_buf = fwd_info->buf_2->data;
 			read_len = fwd_info->buf_2->len;
-		}
-		if (read_buf) {
-			temp_buf = fwd_info->buf_2;
-			atomic_set(&temp_buf->in_busy, 1);
 		}
 	} else {
 		DIAG_LOG(DIAG_DEBUG_PERIPHERALS,

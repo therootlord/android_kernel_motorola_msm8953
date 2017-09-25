@@ -74,6 +74,8 @@
 #define ALS_DYN_INTT_REPORT    1
 
 #define ATTR_RANGE_PATH 1
+#define ALS_LSRC        1
+#define STOW_CHECK_ALS_BEFORE_CAL 1
 
 #define ALSPS_DEBUG 0
 /******************************************************************************
@@ -226,6 +228,10 @@ struct epl_sensor_priv {
 	u16 dt_ps_dyn_l_offset;
 	u16 dt_ps_dyn_h_offset;
 	u8 dt_ps_rs;
+#ifdef ALS_LSRC
+	u8 dt_als_lsrc_adjust;
+	u16 dt_als_lsrc_offset;
+#endif
 };
 #if ATTR_RANGE_PATH
 static struct kobject *kernel_kobj_dev;
@@ -254,6 +260,7 @@ static void epl_sensor_do_ps_auto_k_one(bool ps_far_k_flag);
 #if ALS_DYN_INTT_REPORT
 int epl_sensor_als_dyn_report(bool report_flag);
 #endif
+extern void epl_sensor_enable_als(int enable);
 /******************************************************************************
  *  PS DYN K ONE
  ******************************************************************************/
@@ -309,6 +316,12 @@ static bool enable_stowed_flag;
 static u8 ps_stowed_persist = EPL_PERIST_16;
 static u8 ps_stowed_cycle = EPL_CYCLE_1;
 static u8 ps_stowed_adc = EPL_PSALS_ADC_11;
+#if STOW_CHECK_ALS_BEFORE_CAL
+static bool stowed_cal_flag;
+static u16 stowed_ct = 0xffff;
+static u16 als_th_to_cal_stowed = 10;
+#endif
+
 /******************************************************************************
  *  Sensor calss
  ******************************************************************************/
@@ -522,7 +535,7 @@ static void epl_sensor_report_lux(int report_lux)
 {
 	struct epl_sensor_priv *epld = epl_sensor_obj;
 	ktime_t	timestamp;
-	timestamp = ktime_get();
+	timestamp = ktime_get_boottime();
 #if SPREAD
 	input_report_abs(epld->ps_input_dev, ABS_MISC, report_lux);
 	input_sync(epld->ps_input_dev);
@@ -541,7 +554,7 @@ static void epl_sensor_report_ps_status(void)
 	struct epl_sensor_priv *epld = epl_sensor_obj;
 	ktime_t	timestamp;
 	int distance;
-	timestamp = ktime_get();
+	timestamp = ktime_get_boottime();
 	LOG_DBG("------------------- epl_sensor.ps.data.data=%d, value=%d\n\n",
 			epl_sensor.ps.data.data, ps_status_moto);
 	distance = ps_status_moto;
@@ -876,6 +889,27 @@ static int epl_run_ps_calibration(struct epl_sensor_priv *epl_data)
 	return ch1;
 }
 /*----------------------------------------------------------------------------*/
+#if ALS_LSRC
+int lsrc_raw_convert_to_adc(u32 ch0, u32 ch1)
+{
+	u32 als_offset = 0;
+	u16 nor_raw = 0;
+
+	if (ch1 > 0) {
+		als_offset = (ch0 * ch0) / (ch0+ch1) * epl_sensor_obj->dt_als_lsrc_offset / 1000;
+		LOG_INFO("[%s]: als_offset=%u \r\n", __func__, als_offset);
+		if (als_offset < (2*ch1/3))
+			nor_raw = ch1 - als_offset;
+		else
+			nor_raw = ch1/3;
+	} else
+		nor_raw = ch1;
+
+	LOG_INFO("[%s]: ch0=%d, ch1=%d, nor_raw=%d \r\n", __func__, ch0, ch1, nor_raw);
+
+	return nor_raw;
+}
+#endif
 
 #if ALS_DYN_INTT
 long raw_convert_to_lux(u16 raw_data)
@@ -883,13 +917,18 @@ long raw_convert_to_lux(u16 raw_data)
 	long lux = 0;
 	long dyn_intt_raw = 0;
 	int gain_value = 0;
-
+#if ALS_LSRC
+	u16 als_lsrc_raw = 0, als_dyn_intt_ch0 = 0;
+#endif
 	if (epl_sensor.als.gain == EPL_GAIN_MID) {
 		gain_value = 8;
 	} else if (epl_sensor.als.gain == EPL_GAIN_LOW) {
 		gain_value = 1;
 	}
 	dyn_intt_raw = (raw_data * 10) / (10 * gain_value * als_dynamic_intt_value[dynamic_intt_idx] / als_dynamic_intt_value[1]);
+#if ALS_LSRC
+	als_dyn_intt_ch0 = (epl_sensor.als.data.channels[0] * 10) / (10 * gain_value * als_dynamic_intt_value[dynamic_intt_idx] / als_dynamic_intt_value[1]);
+#endif
 
 	/*LOG_INFO("[%s]: dyn_intt_raw=%ld \r\n", __func__, dyn_intt_raw);*/
 
@@ -897,9 +936,14 @@ long raw_convert_to_lux(u16 raw_data)
 		epl_sensor.als.dyn_intt_raw = 0xffff;
 	else
 		epl_sensor.als.dyn_intt_raw = dyn_intt_raw;
-
-	lux = c_gain * epl_sensor.als.dyn_intt_raw;
-
+#if ALS_LSRC
+	if (epl_sensor_obj->dt_als_lsrc_adjust) {
+		als_lsrc_raw = lsrc_raw_convert_to_adc(als_dyn_intt_ch0, dyn_intt_raw);
+		lux = c_gain * als_lsrc_raw;
+		LOG_INFO("[%s]:raw_data=%d, als_lsrc_raw=%d, lux=%ld\r\n", __func__, raw_data, als_lsrc_raw, lux);
+	} else
+		lux = c_gain * epl_sensor.als.dyn_intt_raw;
+#endif
 	if (lux >= (dynamic_intt_max_lux*dynamic_intt_min_unit)) {
 		LOG_INFO("[%s]:raw_convert_to_lux: change max lux\r\n", __func__);
 		lux = dynamic_intt_max_lux * dynamic_intt_min_unit;
@@ -1170,15 +1214,34 @@ int factory_als_data(void)
 void epl_sensor_enable_ps(int enable)
 {
 	struct epl_sensor_priv *epld = epl_sensor_obj;
+#if STOW_CHECK_ALS_BEFORE_CAL
+	int lflag;
+#endif
 
 	epld->enable_pflag = enable;
 	if (enable) {
 		if (enable_stowed_flag == true &&
 			enable_ps_flag == false) {
-			LOG_INFO("[%s]: stowed enable! \r\n", __func__);
-			epl_sensor.ps.integration_time = EPL_PS_INTT_272;
-			epl_sensor.ps.gain = EPL_GAIN_LOW;
-			epl_sensor.ps.ir_drive = EPL_IR_DRIVE_50;
+			LOG_DBG("[%s]: stowed enable! \r\n", __func__);
+
+#if STOW_CHECK_ALS_BEFORE_CAL
+			lflag = epld->enable_lflag;
+			if (!epld->enable_lflag) {
+				epl_sensor_enable_als(true);
+				epl_sensor_enable_als(lflag);
+			}
+			if (dynamic_intt_lux < als_th_to_cal_stowed)
+				stowed_cal_flag = false;
+			else
+				stowed_cal_flag = true;
+			LOG_DBG("[%s]: stowed cal %d(%d) \r\n", __func__,
+				stowed_cal_flag, dynamic_intt_lux);
+#endif
+
+			epl_sensor.ps.integration_time =
+				(epld->dt_ps_intt << 2);
+			epl_sensor.ps.gain = epld->dt_ps_gain;
+			epl_sensor.ps.ir_drive = epld->dt_ps_ir_drive;
 		} else if (enable_stowed_flag == false &&
 			enable_ps_flag == true) {
 			LOG_DBG("[%s]: PS enable! \r\n", __func__);
@@ -1394,6 +1457,20 @@ static void epl_sensor_do_ps_auto_k_one(bool ps_far_k_flag)
 		LOG_INFO("[%s]: msleep(%d)\r\n", __func__, ps_time);
 		epl_sensor_read_ps(epld->client);
 #endif
+
+#if STOW_CHECK_ALS_BEFORE_CAL
+		if (enable_stowed_flag) {
+			if (!stowed_cal_flag && stowed_ct != 0xffff) {
+				LOG_DBG("[%s]: stowed cal, use old ct %d\r\n", __func__,
+					stowed_ct);
+				epl_sensor.ps.data.data = stowed_ct;
+			}
+			stowed_cal_flag = 0;
+			stowed_ct = epl_sensor.ps.data.data;
+			LOG_DBG("[%s]: stowed cal, ct %d\r\n", __func__, stowed_ct);
+		}
+#endif
+
 		if (epl_sensor.ps.data.data < epld->dt_ps_max_ct &&
 				(epl_sensor.ps.saturation == 0)
 				&& (epl_sensor.ps.data.ir_data < PS_MAX_IR)) {
@@ -1757,7 +1834,7 @@ static void epl_sensor_eint_work(struct work_struct *work)
 			}
 		}
 		if (enable_ps) {
-			wake_lock_timeout(&ps_lock, 2*HZ);
+			wake_lock_timeout(&ps_lock, msecs_to_jiffies(100));
 			epl_sensor_report_ps_status();
 		}
 		/* PS unlock interrupt pin and restart chip */
@@ -1779,7 +1856,7 @@ static void epl_sensor_eint_work(struct work_struct *work)
 				set_psensor_intr_threshold(ps_thd_5cm,
 					ps_thd_3cm);
 			}
-		} else {
+		} else if (ps_dyn_flag == false) {
 			epl_sensor_do_ps_auto_k_one(true);
 		}
 	}
@@ -2761,6 +2838,35 @@ static ssize_t epl_sensor_store_flush(struct device *dev,
 	return count;
 }
 
+#if STOW_CHECK_ALS_BEFORE_CAL
+static ssize_t epl_sensor_show_stowed_cal_th(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	ssize_t len = 0;
+	int value = 0;
+
+	LOG_FUN();
+
+	value = (int)als_th_to_cal_stowed;
+	len = snprintf(buf, PAGE_SIZE, "%d", value);
+
+	return len;
+}
+
+static ssize_t epl_sensor_store_stowed_cal_th(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t count)
+{
+	int value = 0;
+
+	LOG_FUN();
+
+	sscanf(buf, "%d", &value);
+	als_th_to_cal_stowed = (u16)value;
+
+	return count;
+}
+#endif
+
 /*----------------------------------------------------------------------------*/
 /*CTS --> S_IWUSR | S_IRUGO*/
 static DEVICE_ATTR(elan_status, S_IRUGO,
@@ -2832,6 +2938,11 @@ static DEVICE_ATTR(als_lux, S_IRUGO,
 			epl_sensor_show_als_lux, NULL);
 static DEVICE_ATTR(flush, S_IWUSR | S_IRUGO,
 			NULL, epl_sensor_store_flush);
+#if STOW_CHECK_ALS_BEFORE_CAL
+static DEVICE_ATTR(stowed_cal_th, S_IWUSR | S_IRUGO,
+			epl_sensor_show_stowed_cal_th,
+			epl_sensor_store_stowed_cal_th);
+#endif
 /*----------------------------------------------------------------------------*/
 static struct attribute *epl_sensor_attr_list[] = {
 	&dev_attr_elan_status.attr,
@@ -2867,6 +2978,9 @@ static struct attribute *epl_sensor_attr_list[] = {
 	&dev_attr_near.attr,
 	&dev_attr_als_lux.attr,
 	&dev_attr_flush.attr,
+#if STOW_CHECK_ALS_BEFORE_CAL
+	&dev_attr_stowed_cal_th.attr,
+#endif
 	NULL,
 };
 /*----------------------------------------------------------------------------*/
@@ -3661,6 +3775,22 @@ static int epl_sensor_parse_dt(struct device *dev, struct epl_sensor_priv *epld)
 	if (prop)
 		of_property_read_u32(dt, "epl,ps_dyn_h_offset", &temp);
 	epld->dt_ps_dyn_h_offset = (u16)temp;
+
+#if ALS_LSRC
+	temp = 0;
+	prop = of_find_property(dt, "epl,als_lsrc_adjust", NULL);
+	if (prop)
+		of_property_read_u32(dt, "epl,als_lsrc_adjust", &temp);
+	epld->dt_als_lsrc_adjust = (u8)temp;
+
+	if (epld->dt_als_lsrc_adjust) {
+		temp = 0;
+		prop = of_find_property(dt, "epl,als_lsrc_offset", NULL);
+		if (prop)
+			of_property_read_u32(dt, "epl,als_lsrc_offset", &temp);
+		epld->dt_als_lsrc_offset = (u16)temp;
+	}
+#endif
 
 	return 0;
 }

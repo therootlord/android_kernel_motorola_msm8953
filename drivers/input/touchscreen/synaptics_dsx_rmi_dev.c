@@ -89,20 +89,20 @@ static struct bin_attribute attr_data = {
 
 static struct device_attribute attrs[] = {
 	__ATTR(open, S_IWUSR | S_IWGRP,
-			synaptics_rmi4_show_error,
+			NULL,
 			rmidev_sysfs_open_store),
 	__ATTR(release, S_IWUSR | S_IWGRP,
-			synaptics_rmi4_show_error,
+			NULL,
 			rmidev_sysfs_release_store),
 	__ATTR(address, S_IWUSR | S_IWGRP,
-			synaptics_rmi4_show_error,
+			NULL,
 			rmidev_sysfs_address_store),
 	__ATTR(length, S_IWUSR | S_IWGRP,
-			synaptics_rmi4_show_error,
+			NULL,
 			rmidev_sysfs_length_store),
 	__ATTR(attn_state, S_IRUSR | S_IRGRP,
 			rmidev_sysfs_attn_state_show,
-			synaptics_rmi4_store_error),
+			NULL),
 };
 
 static int rmidev_major_num;
@@ -337,16 +337,16 @@ static ssize_t rmidev_read(struct file *filp, char __user *buf,
 
 	mutex_lock(&(dev_data->file_mutex));
 
-	if (*f_pos > REG_ADDR_LIMIT) {
-		retval = -EFAULT;
-		goto clean_up;
-	}
-
 	if (count > (REG_ADDR_LIMIT - *f_pos))
 		count = REG_ADDR_LIMIT - *f_pos;
 
 	if (count == 0) {
 		retval = 0;
+		goto clean_up;
+	}
+
+	if (*f_pos > REG_ADDR_LIMIT) {
+		retval = -EFAULT;
 		goto clean_up;
 	}
 
@@ -396,16 +396,16 @@ static ssize_t rmidev_write(struct file *filp, const char __user *buf,
 
 	mutex_lock(&(dev_data->file_mutex));
 
-	if (*f_pos > REG_ADDR_LIMIT) {
-		retval = -EFAULT;
-		goto clean_up;
-	}
-
 	if (count > (REG_ADDR_LIMIT - *f_pos))
 		count = REG_ADDR_LIMIT - *f_pos;
 
 	if (count == 0) {
 		retval = 0;
+		goto clean_up;
+	}
+
+	if (*f_pos > REG_ADDR_LIMIT) {
+		retval = -EFAULT;
 		goto clean_up;
 	}
 

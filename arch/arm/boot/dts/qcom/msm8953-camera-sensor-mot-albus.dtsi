@@ -311,6 +311,18 @@
 			};
 		};
 
+		cam_sensor_mclk2_default: cam_sensor_mclk2_default {
+			config {
+				drive-strength = <4>; /* 4 MA */
+			};
+		};
+
+		cam_sensor_mclk2_sleep: cam_sensor_mclk2_sleep {
+			config {
+				drive-strength = <4>; /* 4 MA */
+			};
+		};
+
 		cam_sensor_front_default: cam_sensor_front_default {
 		/* RESET, VDIG */
 			mux {
@@ -347,6 +359,9 @@
 		qcom,flash-source = <&pmi8950_flash0 &pmi8950_flash1>;
 		qcom,torch-source = <&pmi8950_torch0 &pmi8950_torch1>;
 		qcom,switch-source = <&pmi8950_switch>;
+		/* gpio 113 is used to select between front/rear flash */
+		gpios = <&tlmm 113 0>;
+		qcom,gpio-custom1 = <0>;
 	};
 };
 &rpm_bus {
@@ -363,20 +378,21 @@
 &spmi_bus {
 	qcom,pmi8950@3 {
 		qcom,leds@d300 {
+			qcom,clamp-current = <75>;
 			qcom,flash_0 {
 				qcom,max-current = <1000>;
-				qcom,duration = <1200>;
+				qcom,duration = <400>;
 				qcom,current = <650>;
 				qcom,alt-max-current = <250>;
-				qcom,alt-duration = <150>;
+				qcom,alt-duration = <400>;
 				qcom,alt-current = <100>;
 			};
 			qcom,flash_1 {
 				qcom,max-current = <1000>;
-				qcom,duration = <1200>;
+				qcom,duration = <400>;
 				qcom,current = <650>;
 				qcom,alt-max-current = <250>;
-				qcom,alt-duration = <150>;
+				qcom,alt-duration = <400>;
 				qcom,alt-current = <100>;
 			};
 			qcom,torch_0 {
@@ -390,6 +406,9 @@
 				qcom,current = <75>;
 				qcom,alt-max-current = <50>;
 				qcom,alt-current = <12>;
+			};
+			qcom,switch {
+				qcom,duration = <400>;
 			};
 		};
 	};

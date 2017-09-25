@@ -1,7 +1,7 @@
 /*
 * Copyright (c) 2016, STMicroelectronics - All Rights Reserved
 *
-* License terms: BSD 3-clause "New" or "Revised" License.
+*License terms : BSD 3-clause "New" or "Revised" License.
 *
 * Redistribution and use in source and binary forms, with or without
 * modification, are permitted provided that the following conditions are met:
@@ -42,10 +42,6 @@
 
 #include "vl53l1_api.h"
 
-/* #define DEBUG */
-/* #define FORCE_CONSOLE_DEBUG */
-
-
 /**
  * IPP adapt
  */
@@ -73,43 +69,45 @@
  */
 /* define CFG_STMVL53L1_HAVE_REGULATOR */
 
-#define STMVL53L1_SLAVE_ADDR	(0x52>>1)
+#define DRIVER_VERSION		"8.0.0_b4.1._1268"
 
-#define DRIVER_VERSION		"5.0.0"
-
-/**@defgroup  vl53l1_mod_dbg
- *
- * comment or not DEBUG in stmvl53l1.h to enable debug msg
- *
- * comment or not FORCE_CONSOLE_DEBUG in stmvl53l1.h  to force dbg msg
- * as info log direct echo on main console (require debug)
+/** @ingroup vl53l1_config
+ * @{
  */
-
+/**
+ * Configure max number of device the driver can support
+ */
+#define STMVL53L1_CFG_MAX_DEV	2
 /** @ingroup vl53l1_mod_dbg
  * @{
  */
-#if 0
+#if 1
 #define DEBUG	1
 #endif
 #if 0
 #define FORCE_CONSOLE_DEBUG
 #endif
 
+extern int stmvl53l1_enable_debug;
 
 #ifdef DEBUG
 #	ifdef FORCE_CONSOLE_DEBUG
-#		define vl53l1_dbgmsg(str, ...)\
-	printk(KERN_INFO "%s: " str, __func__, ##__VA_ARGS__)
+#define vl53l1_dbgmsg(str, ...) do { \
+	if (stmvl53l1_enable_debug) \
+		pr_info("%s: " str, __func__, ##__VA_ARGS__); \
+	} while (0)
 #	else
-#		define vl53l1_dbgmsg(str, ...)\
-	printk(KERN_DEBUG "%s: " str, __func__, ##__VA_ARGS__)
+#define vl53l1_dbgmsg(str, ...) do { \
+	if (stmvl53l1_enable_debug) \
+		pr_debug("%s: " str, __func__, ##__VA_ARGS__); \
+	} while (0)
 #	endif
 #else
 #	define vl53l1_dbgmsg(...) (void)0
 #endif
 
 /**
- * set to 0 1 static config activate debug from work (data interrupt/polling)
+ * set to 0 1 activate or not debug from work (data interrupt/polling)
  */
 #define WORK_DEBUG	0
 #if WORK_DEBUG
@@ -120,17 +118,13 @@
 #endif
 
 #define vl53l1_info(str, args...) \
-	pr_info("%s: " str "\n", __func__, ##args)
+	pr_info("%s: " str, __func__, ##args)
 
 #define vl53l1_errmsg(str, args...) \
 	pr_err("%s: " str, __func__, ##args)
 
 #define vl53l1_wanrmsg(str, args...) \
-	pr_warning("%s: " str, __func__, ##args)
-
-
-#define VL53L0_VDD_MIN      2600000
-#define VL53L0_VDD_MAX      3000000
+	pr_warn("%s: " str, __func__, ##args)
 
 /* turn off poll log if not defined */
 #ifndef STMVL53L1_LOG_POLL_TIMING
@@ -147,32 +141,11 @@
 #include <linux/netlink.h>
 #include <linux/wait.h>
 
-
-/**
- * @mainpage
- * @section ipp_abort abort and stop during ipp call
- *
- *  device will not be locked "while ipp fly" between kernel and user so we can
- *  accept and executed stop/abort and flush (android) other command
- *  in a say "no block" or reasonable "no wait" time
- *
- *  That is to ensure if anything goes wrong in user space (slow, dies ) driver
- *  is  not maintain in a dead-locked for ever state.
- *
- *  In case range is stoped/aborted while ipp fly their's a rare but possible
- *  scenarios where a races can occur causing possibly a deadlock,bad-handling
- *  if restarting very quickly.\n
- *  This can be eliminated by putting some requirement constrains on
- *  back to back execution of stop re-start and dedicatin a  wait queue
- *  (to wait previous flying ipp) .
- *
- *  In a  second step we' could make "start " blocking to eliminated this
- *  (extra wait queue)
- *  @warning beware that is not handled rigth now !
+/** if set to 1 enable ipp execution timing (if debug enabled)
+ * @ingroup vl53l1_mod_dbg
  */
-
-/** if set to 1 enable ipp execution timing */
 #define IPP_LOG_TIMING	1
+
 struct ipp_data_t {
 	struct ipp_work_t work;
 	struct ipp_work_t work_out;
@@ -187,11 +160,6 @@ struct ipp_data_t {
 	 * it's ok for daemon to use 0 in "ping" when it identify himself
 	*/
 	int status;	/** if that is not 0 do not look at out work data */
-	struct mutex mutex;
-	/*!< the mutex that shall be held when looking at this struct
-	 * but holding the main lock could be enough in opposite holding this
-	lock does not granted using the device data without work lock
-	*/
 	wait_queue_head_t waitq;
 	/*!< ipp caller are put in that queue wait while job is posted to user
 	 * @warning  ipp and dev mutex will be released before waiting
@@ -202,17 +170,23 @@ struct ipp_data_t {
 #endif
 };
 
+struct stmvl53l1_waiters {
+	struct list_head list;
+	pid_t pid;
+};
+
 /*
  *  driver data structs
  */
 struct stmvl53l1_data {
 	int id;			/*!< multiple device id 0 based*/
 	char name[64];		/*!< misc device name */
+	int32_t hw_rev;		/*!< hardware revision number*/
 
 	VL53L1_DevData_t stdev;	/*!<embed ST VL53L0 Dev data as "stdev" */
 
 	void *client_object;	/*!< cci or i2c moduel i/f speficic ptr  */
-
+	bool is_device_remove;	/*!< true when device has been remove */
 
 	struct mutex work_mutex; /*!< main dev mutex/lock */;
 	struct delayed_work	dwork;
@@ -223,8 +197,8 @@ struct stmvl53l1_data {
 
 	/* misc device */
 	struct miscdevice miscdev;
-	int reset;
-	/*!< set when device got reset or re-powered and require more setup */
+	/* first irq has no valid data, so avoid to update data on first one */
+	int is_first_irq;
 
 	/* control data */
 	int poll_mode;	/*!< use poll even if interrupt line present*/
@@ -232,18 +206,28 @@ struct stmvl53l1_data {
 	int enable_sensor;	/*!< actual device enabled state  */
 	struct timeval start_tv;/*!< stream start time */
 	int enable_debug;
+	bool allow_hidden_start_stop; /*!< allow stop/start sequence in bare */
 
 	/* Custom values set by app */
 
 	int preset_mode;	/*!< preset working mode of the device */
 	uint32_t timing_budget;	/*!< Timing Budget */
-
+	int distance_mode;	/*!< distance mode of the device */
+	int crosstalk_enable;	/*!< is crosstalk compensation is enable */
+	int output_mode;	/*!< output mode of the device */
+	bool force_device_on_en;/*!< keep device active when stopped */
+	int sar_mode; /*!< is sar mode enable/disabled */
+	int cam_mode; /*!< is camera mode enable/disabled */
+	VL53L1_Error last_error;/*!< last device internal error */
 	/* PS parameters */
 
 	/* Calibration parameters */
-
-	/* Calibration values */
-	int offset_cal_distance;
+	bool is_calibrating;	/*!< active during calibration phases */
+	uint16_t xtalk_offset; /*!< crosstalk compensation plane offset kcps */
+	int16_t xtalk_x; /*!< crosstalk compensation x plane gradient kcps */
+	int16_t xtalk_y; /*!< crosstalk compensation y plane gradient kcps */
+	int16_t inner_offset; /*!< inner offset mm */
+	int16_t outer_offset; /*!< outer offset mm */
 
 	/* Range Data and stat */
 	struct range_t {
@@ -260,16 +244,37 @@ struct stmvl53l1_data {
 	} meas;
 
 	/* workqueue use to fire flush event */
-	struct delayed_work flush_work;
 	uint32_t flushCount;
+	int flush_todo_counter;
 
 	/* Device parameters */
 	/* Polling thread */
 	/* Wait Queue on which the poll thread blocks */
 
+	/* Manage blocking ioctls */
+	struct list_head simple_data_reader_list;
+	struct list_head mz_data_reader_list;
+	wait_queue_head_t waiter_for_data;
+	bool is_data_valid;
+
+	/* control when using delay is acceptable */
+	bool is_delay_allowed;
+
+	/* maintain reset state */
+	int reset_state;
+
 	/* Recent interrupt status */
 	/* roi */
 	VL53L1_RoiConfig_t roi_cfg;
+
+	/* autonomous config */
+	uint32_t auto_pollingTimeInMs;
+	VL53L1_DetectionConfig_t auto_config;
+
+	/* autonomous config for camera */
+	uint32_t auto_pollingTimeInMs_cam;
+	VL53L1_DetectionConfig_t auto_config_cam;
+
 	/* Debug */
 	struct ipp_data_t ipp;
 #if IPP_LOG_TIMING
@@ -280,10 +285,11 @@ struct stmvl53l1_data {
 #	define stmvl531_ipp_time(data)\
 		stmvl53l1_tv_dif(&data->ipp.start_tv, &data->ipp.stop_tv)
 #	define stmvl531_ipp_stat(data, fmt, ...)\
-		printk(KERN_DEBUG "IPPSTAT " fmt "\n", ##__VA_ARGS__)
+		vl53l1_dbgmsg("IPPSTAT " fmt "\n", ##__VA_ARGS__)
 #else
 #	define stmvl531_ipp_tim_stop(data) (void)0
 #	define stmvl531_ipp_tim_start(data) (void)0
+#	define stmvl531_ipp_stat(...) (void)0
 #endif
 };
 

@@ -26,7 +26,6 @@
 #include <linux/slab.h>
 #include <linux/types.h>
 #include <linux/fs.h>
-#include <linux/i2c.h>
 #include <linux/semaphore.h>
 #include <linux/device.h>
 #include <linux/syscalls.h>
@@ -45,6 +44,7 @@
 #include <linux/of.h>
 #include <linux/of_gpio.h>
 #include <linux/drv2624.h>
+#include <soc/qcom/bootinfo.h>
 
 static struct drv2624_data *g_DRV2624data;
 
@@ -129,6 +129,57 @@ drv2624_set_bits(struct drv2624_data *ctrl,
 	return ret;
 }
 
+static void
+drv2624_change_voltage(struct drv2624_data *ctrl, enum work_mode mode)
+{
+	struct drv2624_platform_data *pDrv2624Platdata =
+	    &ctrl->msPlatData;
+	struct actuator_data actuator = pDrv2624Platdata->msActuator;
+
+	if (mode !=  actuator.meWorkMode) {
+		if (mode == REDUCED) {
+			/*write reduced strength voltages*/
+			drv2624_reg_write(ctrl,
+				DRV2624_REG_RATED_VOLTAGE,
+				actuator.mnRatedVoltageReduced);
+			drv2624_reg_write(ctrl,
+				DRV2624_REG_OVERDRIVE_CLAMP,
+				actuator.mnOverDriveClampVoltageReduced);
+			pDrv2624Platdata->msActuator.meWorkMode = REDUCED;
+			dev_dbg(ctrl->dev, "%s, reduced voltage!\n", __func__);
+		} else {
+			/*back to default voltages from device tree*/
+			drv2624_reg_write(ctrl,
+				DRV2624_REG_RATED_VOLTAGE,
+				actuator.mnRatedVoltage);
+			drv2624_reg_write(ctrl,
+				DRV2624_REG_OVERDRIVE_CLAMP,
+				actuator.mnOverDriveClampVoltage);
+			pDrv2624Platdata->msActuator.meWorkMode = NORMAL;
+			dev_dbg(ctrl->dev, "%s, restored voltage.\n", __func__);
+		}
+	}
+}
+
+static void
+drv2624_hap_context(struct drv2624_data *ctrl, unsigned char val)
+{
+	int t_top;
+	enum work_mode mode;
+
+	if (!gpio_is_valid(ctrl->msPlatData.mnGpioVCTRL))
+		return;
+
+	t_top = gpio_get_value(ctrl->msPlatData.mnGpioVCTRL);
+	if (t_top && atomic_read(&ctrl->reduce_pwr) &&
+		(ctrl->mnCurrentVibrationTime > 100)) {
+		dev_dbg(ctrl->dev, "%s: haptic reduced\n", __func__);
+		mode = REDUCED;
+	} else
+		mode = NORMAL;
+	drv2624_change_voltage(ctrl, mode);
+}
+
 static int
 drv2624_set_go_bit(struct drv2624_data *ctrl, unsigned char val)
 {
@@ -136,6 +187,8 @@ drv2624_set_go_bit(struct drv2624_data *ctrl, unsigned char val)
 	int value = 0;
 	int retry = 10; /* to finish auto-brake*/
 
+	if (!ctrl->factory_mode && ctrl->reduced_pwr_capable && val == GO)
+		drv2624_hap_context(ctrl, val);
 	val &= 0x01;
 	ret = drv2624_reg_write(ctrl, DRV2624_REG_GO, val);
 	if (ret >= 0) {
@@ -216,6 +269,7 @@ static void vibrator_enable(struct timed_output_dev *dev, int value)
 
 		drv2624_change_mode(ctrl, MODE_RTP);
 		ctrl->mnVibratorPlaying = YES;
+		ctrl->mnCurrentVibrationTime = value;
 		drv2624_set_go_bit(ctrl, GO);
 		value = (value > MAX_TIMEOUT) ? MAX_TIMEOUT : value;
 		hrtimer_start(&ctrl->timer,
@@ -974,6 +1028,7 @@ static void dev_init_platform_data(struct drv2624_data *ctrl)
 		dev_err(ctrl->dev,
 			"%s, ERROR OverDriveVol ZERO\n", __func__);
 	}
+	actuator.meWorkMode = NORMAL;
 	/*update sample_time*/
 	drv2624_reg_write(ctrl,
 			  DRV2624_REG_SAMPLE_TIME,
@@ -1041,6 +1096,13 @@ static struct regmap_config drv2624_i2c_regmap = {
 	.cache_type = REGCACHE_NONE,
 };
 
+static inline bool drv2624_reduced_pwr_on(struct drv2624_platform_data *pdata)
+{
+	return (pdata->msActuator.mnRatedVoltageReduced != 0) &&
+		(pdata->msActuator.mnOverDriveClampVoltageReduced != 0) &&
+		gpio_is_valid(pdata->mnGpioVCTRL);
+}
+
 #ifdef CONFIG_OF
 static struct drv2624_platform_data *drv2624_of_init(struct i2c_client *client)
 {
@@ -1054,20 +1116,22 @@ static struct drv2624_platform_data *drv2624_of_init(struct i2c_client *client)
 
 	pdata->mnGpioNRST = of_get_named_gpio(np, "ti,nrst-gpio", 0);
 	if (!gpio_is_valid(pdata->mnGpioNRST)) {
-		pdata->mnGpioNRST = 0;
-		dev_info(&client->dev, "%s: no RST gpio provided\n", __func__);
+		dev_warn(&client->dev, "%s: no RST gpio provided\n", __func__);
 	}
 
 	pdata->mnGpioNPWR = of_get_named_gpio(np, "ti,npwr-gpio", 0);
 	if (!gpio_is_valid(pdata->mnGpioNPWR)) {
-		pdata->mnGpioNPWR = 0;
-		dev_info(&client->dev, "%s: no npwr gpio provided\n", __func__);
+		dev_warn(&client->dev, "%s: no NPWR gpio provided\n", __func__);
 	}
 
 	pdata->mnGpioINT = of_get_named_gpio(np, "ti,irqz-gpio", 0);
 	if (!gpio_is_valid(pdata->mnGpioINT)) {
-		pdata->mnGpioINT = 0;
-		dev_err(&client->dev, "%s: no IRQ gpio provided\n", __func__);
+		dev_warn(&client->dev, "%s: no IRQ gpio provided\n", __func__);
+	}
+
+	pdata->mnGpioVCTRL = of_get_named_gpio(np, "ti,nvctrl-gpio", 0);
+	if (!gpio_is_valid(pdata->mnGpioVCTRL)) {
+		dev_warn(&client->dev, "%s: no VCTRL gpio provided\n", __func__);
 	}
 
 	rc = of_property_read_u8(np, "ti,rated_voltage",
@@ -1084,6 +1148,18 @@ static struct drv2624_platform_data *drv2624_of_init(struct i2c_client *client)
 			__func__);
 		return NULL;
 	}
+
+	rc = of_property_read_u8(np, "ti,rated_voltage_reduced",
+		&pdata->msActuator.mnRatedVoltageReduced);
+	if (rc && gpio_is_valid(pdata->mnGpioVCTRL))
+		dev_warn(&client->dev, "%s: rated voltage reduced read failed\n",
+			__func__);
+
+	rc = of_property_read_u8(np, "ti,overdrive_voltage_reduced",
+		&pdata->msActuator.mnOverDriveClampVoltageReduced);
+	if (rc && gpio_is_valid(pdata->mnGpioVCTRL))
+		dev_warn(&client->dev, "%s: overdrive voltage reduced read failed\n",
+			__func__);
 
 	rc = of_property_read_u8(np, "ti,sample_time",
 		&pdata->msActuator.mnSampleTime);
@@ -1129,6 +1205,115 @@ static inline struct drv2624_platform_data
 }
 #endif
 
+/* Attribute: reduce (RW) */
+static ssize_t reduce_store(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct drv2624_data *ctrl = dev_get_drvdata(dev);
+	atomic_set(&ctrl->reduce_pwr, (*buf == '0')?0:1);
+	dev_dbg(ctrl->dev, HAPTICS_DEVICE_NAME "%s: reduce set to %d",
+		__func__, atomic_read(&ctrl->reduce_pwr));
+	return count;
+}
+
+static ssize_t reduce_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	struct drv2624_data *ctrl = dev_get_drvdata(dev);
+	int state = atomic_read(&ctrl->reduce_pwr);
+	return scnprintf(buf, PAGE_SIZE, "%d", state);
+}
+
+DEVICE_ATTR(reduce, (S_IRUGO | S_IWUSR | S_IWGRP),
+			reduce_show, reduce_store);
+
+#include <linux/major.h>
+#include <linux/kdev_t.h>
+#include <linux/idr.h>
+
+#define VIBDEV_MAJOR 198 /* falls within gap in major numbers */
+
+static DEFINE_IDA(minors);
+
+/* Attribute: path (RO) */
+static ssize_t path_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	struct drv2624_data *ctrl = dev_get_drvdata(dev);
+	ssize_t blen;
+	const char *path;
+
+	if (!ctrl) {
+		pr_err("cannot get data pointer\n");
+		return (ssize_t)0;
+	}
+	path = kobject_get_path(&ctrl->i2c_client->dev.kobj, GFP_KERNEL);
+	blen = scnprintf(buf, PAGE_SIZE, "%s", path ? path : "na");
+	kfree(path);
+	return blen;
+}
+
+/* Attribute: vendor (RO) */
+static ssize_t vendor_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	return scnprintf(buf, PAGE_SIZE, "ti," HAPTICS_DEVICE_NAME);
+}
+
+DEVICE_ATTR_RO(path);
+DEVICE_ATTR_RO(vendor);
+
+static struct attribute *vibrator_attrs[] = {
+	&dev_attr_path.attr,
+	&dev_attr_vendor.attr,
+	NULL,
+};
+
+ATTRIBUTE_GROUPS(vibrator);
+
+static struct class vibrator_class = {
+	.name		= "vibrator",
+	.owner		= THIS_MODULE,
+	.dev_groups	= vibrator_groups,
+};
+
+static int
+drv2624_class_vibrator(struct drv2624_data *ctrl, bool create)
+{
+	int error = 0;
+	static struct device *vib_class_dev;
+	static int minor;
+
+	if (create) {
+		error = class_register(&vibrator_class);
+		if (error)
+			return error;
+
+		minor = ida_simple_get(&minors,
+				ctrl->i2c_client->addr, 0, GFP_KERNEL);
+		if (minor < 0)
+			minor = ida_simple_get(&minors, 0, 0, GFP_KERNEL);
+
+		dev_info(ctrl->dev, "assigned minor %d\n", minor);
+		vib_class_dev = device_create(&vibrator_class, NULL,
+				MKDEV(VIBDEV_MAJOR, minor),
+				ctrl, HAPTICS_DEVICE_NAME);
+		if (IS_ERR(vib_class_dev)) {
+			error = PTR_ERR(vib_class_dev);
+			vib_class_dev = NULL;
+			return error;
+		}
+	} else {
+		if (!vib_class_dev)
+			return -ENODEV;
+		device_destroy(&vibrator_class, MKDEV(VIBDEV_MAJOR, minor));
+		vib_class_dev = NULL;
+		class_unregister(&vibrator_class);
+	}
+
+	return 0;
+}
+
 static int
 drv2624_probe(struct i2c_client *client, const struct i2c_device_id *id)
 {
@@ -1159,6 +1344,8 @@ drv2624_probe(struct i2c_client *client, const struct i2c_device_id *id)
 		return -ENOMEM;
 	}
 
+	ctrl->reduced_pwr_capable = drv2624_reduced_pwr_on(pdata);
+	ctrl->i2c_client = client;
 	ctrl->dev = &client->dev;
 	ctrl->mpRegmap = devm_regmap_init_i2c(client, &drv2624_i2c_regmap);
 	if (IS_ERR(ctrl->mpRegmap)) {
@@ -1172,7 +1359,7 @@ drv2624_probe(struct i2c_client *client, const struct i2c_device_id *id)
 	memcpy(&ctrl->msPlatData, pdata, sizeof(struct drv2624_platform_data));
 	i2c_set_clientdata(client, ctrl);
 
-	if (ctrl->msPlatData.mnGpioNPWR) {
+	if (gpio_is_valid(ctrl->msPlatData.mnGpioNPWR)) {
 		err = gpio_request(ctrl->msPlatData.mnGpioNPWR,
 				 HAPTICS_DEVICE_NAME "NPWR");
 		if (err < 0) {
@@ -1185,7 +1372,7 @@ drv2624_probe(struct i2c_client *client, const struct i2c_device_id *id)
 		udelay(100);
 	}
 
-	if (ctrl->msPlatData.mnGpioNRST) {
+	if (gpio_is_valid(ctrl->msPlatData.mnGpioNRST)) {
 		err = gpio_request(ctrl->msPlatData.mnGpioNRST,
 				 HAPTICS_DEVICE_NAME "NRST");
 		if (err < 0) {
@@ -1212,7 +1399,7 @@ drv2624_probe(struct i2c_client *client, const struct i2c_device_id *id)
 
 	dev_init_platform_data(ctrl);
 
-	if (ctrl->msPlatData.mnGpioINT) {
+	if (gpio_is_valid(ctrl->msPlatData.mnGpioINT)) {
 		err = gpio_request(ctrl->msPlatData.mnGpioINT,
 				 HAPTICS_DEVICE_NAME "INT");
 		if (err < 0) {
@@ -1251,15 +1438,30 @@ drv2624_probe(struct i2c_client *client, const struct i2c_device_id *id)
 			dev_err(ctrl->dev, "%s: ERROR calibration\n", __func__);
 	}
 
+	ctrl->factory_mode = (!strncmp("mot-factory", bi_bootmode(), BOOTMODE_MAX_LEN)) ||
+				(!strncmp("factory", bi_bootmode(), BOOTMODE_MAX_LEN));
+
+	if (ctrl->reduced_pwr_capable) {
+		/* init reduced force flag to "1" */
+		/* modservice will flip flag if MOD is attached */
+		atomic_set(&ctrl->reduce_pwr, 1);
+		err = sysfs_create_file(&client->dev.kobj, &dev_attr_reduce.attr);
+		if (err < 0)
+			dev_err(ctrl->dev, "%s: Failed to create reduce attributes\n",
+				__func__);
+	}
+
+	drv2624_class_vibrator(ctrl, true);
+
 	dev_info(ctrl->dev, "drv2624 probe succeeded\n");
 
 	return 0;
 
  exit_gpio_request_failed:
-	if (ctrl->msPlatData.mnGpioNRST)
+	if (gpio_is_valid(ctrl->msPlatData.mnGpioNRST))
 		gpio_free(ctrl->msPlatData.mnGpioNRST);
 
-	if (ctrl->msPlatData.mnGpioINT)
+	if (gpio_is_valid(ctrl->msPlatData.mnGpioINT))
 		gpio_free(ctrl->msPlatData.mnGpioINT);
 
 	dev_err(ctrl->dev, "%s failed, err=%d\n", __func__, err);
@@ -1270,13 +1472,14 @@ static int drv2624_remove(struct i2c_client *client)
 {
 	struct drv2624_data *ctrl = i2c_get_clientdata(client);
 
-	if (ctrl->msPlatData.mnGpioNRST)
+	if (gpio_is_valid(ctrl->msPlatData.mnGpioNRST))
 		gpio_free(ctrl->msPlatData.mnGpioNRST);
 
-	if (ctrl->msPlatData.mnGpioINT)
+	if (gpio_is_valid(ctrl->msPlatData.mnGpioINT))
 		gpio_free(ctrl->msPlatData.mnGpioINT);
 
 	misc_deregister(&drv2624_misc);
+	drv2624_class_vibrator(ctrl, false);
 
 	return 0;
 }

@@ -2,7 +2,8 @@
 /*
 * Copyright (c) 2016, STMicroelectronics - All Rights Reserved
 *
-* This file is part of VL53L1 Core and is dual licensed, either 'STMicroelectronics Proprietary license'
+* This file is part of VL53L1 Core and is dual licensed, either 'STMicroelectronics
+* Proprietary license'
 * or 'BSD 3-clause "New" or "Revised" License' , at your option.
 *
 ********************************************************************************
@@ -11,7 +12,8 @@
 *
 ********************************************************************************
 *
-* License terms: STMicroelectronics Proprietary in accordance with licensing terms at www.st.com/sla0044
+* License terms: STMicroelectronics Proprietary in accordance with licensing
+* terms at www.st.com/sla0044
 *
 * STMicroelectronics confidential
 * Reproduction and Communication of this document is strictly prohibited unless
@@ -21,7 +23,8 @@
 ********************************************************************************
 *
 * Alternatively, VL53L1 Core may be distributed under the terms of
-* 'BSD 3-clause "New" or "Revised" License', in which case the following provisions apply instead of the ones
+* 'BSD 3-clause "New" or "Revised" License', in which case the following
+* provisions apply instead of the ones
 * mentioned above :
 *
 ********************************************************************************
@@ -122,119 +125,194 @@ VL53L1_Error VL53L1_get_pal_error_string(
 	case VL53L1_ERROR_NONE:
 		VL53L1_COPYSTRING(pPalErrorString,
 			VL53L1_STRING_ERROR_NONE);
-	break;
+		break;
 	case VL53L1_ERROR_CALIBRATION_WARNING:
 		VL53L1_COPYSTRING(pPalErrorString,
 			VL53L1_STRING_ERROR_CALIBRATION_WARNING);
-	break;
+		break;
 	case VL53L1_ERROR_MIN_CLIPPED:
 		VL53L1_COPYSTRING(pPalErrorString,
 			VL53L1_STRING_ERROR_MIN_CLIPPED);
-	break;
+		break;
 	case VL53L1_ERROR_UNDEFINED:
 		VL53L1_COPYSTRING(pPalErrorString,
 			VL53L1_STRING_ERROR_UNDEFINED);
-	break;
+		break;
 	case VL53L1_ERROR_INVALID_PARAMS:
 		VL53L1_COPYSTRING(pPalErrorString,
 			VL53L1_STRING_ERROR_INVALID_PARAMS);
-	break;
+		break;
 	case VL53L1_ERROR_NOT_SUPPORTED:
 		VL53L1_COPYSTRING(pPalErrorString,
 			VL53L1_STRING_ERROR_NOT_SUPPORTED);
-	break;
+		break;
 	case VL53L1_ERROR_RANGE_ERROR:
 		VL53L1_COPYSTRING(pPalErrorString,
 			VL53L1_STRING_ERROR_RANGE_ERROR);
-	break;
+		break;
 	case VL53L1_ERROR_TIME_OUT:
 		VL53L1_COPYSTRING(pPalErrorString,
 			VL53L1_STRING_ERROR_TIME_OUT);
-	break;
+		break;
 	case VL53L1_ERROR_MODE_NOT_SUPPORTED:
 		VL53L1_COPYSTRING(pPalErrorString,
 			VL53L1_STRING_ERROR_MODE_NOT_SUPPORTED);
-	break;
+		break;
 	case VL53L1_ERROR_BUFFER_TOO_SMALL:
 		VL53L1_COPYSTRING(pPalErrorString,
 			VL53L1_STRING_ERROR_BUFFER_TOO_SMALL);
-	break;
+		break;
 	case VL53L1_ERROR_COMMS_BUFFER_TOO_SMALL:
 		VL53L1_COPYSTRING(pPalErrorString,
 			VL53L1_STRING_ERROR_COMMS_BUFFER_TOO_SMALL);
-	break;
+		break;
 	case VL53L1_ERROR_GPIO_NOT_EXISTING:
 		VL53L1_COPYSTRING(pPalErrorString,
 			VL53L1_STRING_ERROR_GPIO_NOT_EXISTING);
-	break;
+		break;
 	case VL53L1_ERROR_GPIO_FUNCTIONALITY_NOT_SUPPORTED:
 		VL53L1_COPYSTRING(pPalErrorString,
 			VL53L1_STRING_ERROR_GPIO_FUNCTIONALITY_NOT_SUPPORTED);
-	break;
+		break;
 	case VL53L1_ERROR_CONTROL_INTERFACE:
 		VL53L1_COPYSTRING(pPalErrorString,
 			VL53L1_STRING_ERROR_CONTROL_INTERFACE);
-	break;
+		break;
 	case VL53L1_ERROR_INVALID_COMMAND:
 		VL53L1_COPYSTRING(pPalErrorString,
 			VL53L1_STRING_ERROR_INVALID_COMMAND);
-	break;
+		break;
 	case VL53L1_ERROR_DIVISION_BY_ZERO:
 		VL53L1_COPYSTRING(pPalErrorString,
 			VL53L1_STRING_ERROR_DIVISION_BY_ZERO);
-	break;
+		break;
 	case VL53L1_ERROR_REF_SPAD_INIT:
 		VL53L1_COPYSTRING(pPalErrorString,
 			VL53L1_STRING_ERROR_REF_SPAD_INIT);
-	break;
-
+		break;
 	case VL53L1_ERROR_GPH_SYNC_CHECK_FAIL:
 		VL53L1_COPYSTRING(pPalErrorString,
 			VL53L1_STRING_ERROR_GPH_SYNC_CHECK_FAIL);
-	break;
+		break;
 	case VL53L1_ERROR_STREAM_COUNT_CHECK_FAIL:
 		VL53L1_COPYSTRING(pPalErrorString,
 			VL53L1_STRING_ERROR_STREAM_COUNT_CHECK_FAIL);
-	break;
+		break;
 	case VL53L1_ERROR_GPH_ID_CHECK_FAIL:
 		VL53L1_COPYSTRING(pPalErrorString,
 			VL53L1_STRING_ERROR_GPH_ID_CHECK_FAIL);
-	break;
+		break;
 	case VL53L1_ERROR_ZONE_STREAM_COUNT_CHECK_FAIL:
 		VL53L1_COPYSTRING(pPalErrorString,
 			VL53L1_STRING_ERROR_ZONE_STREAM_COUNT_CHECK_FAIL);
-	break;
+		break;
 	case VL53L1_ERROR_ZONE_GPH_ID_CHECK_FAIL:
 		VL53L1_COPYSTRING(pPalErrorString,
 			VL53L1_STRING_ERROR_ZONE_GPH_ID_CHECK_FAIL);
-	break;
+		break;
 
-	case VL53L1_DEF_00164:
+	case VL53L1_ERROR_XTALK_EXTRACTION_NO_SAMPLE_FAIL:
+		VL53L1_COPYSTRING(pPalErrorString,
+			VL53L1_STRING_ERROR_XTALK_EXTRACTION_NO_SAMPLES_FAIL);
+		break;
+	case VL53L1_ERROR_XTALK_EXTRACTION_SIGMA_LIMIT_FAIL:
+		VL53L1_COPYSTRING(pPalErrorString,
+			VL53L1_STRING_ERROR_XTALK_EXTRACTION_SIGMA_LIMIT_FAIL);
+		break;
+
+	case VL53L1_ERROR_OFFSET_CAL_NO_SAMPLE_FAIL:
+		VL53L1_COPYSTRING(pPalErrorString,
+			VL53L1_STRING_ERROR_OFFSET_CAL_NO_SAMPLE_FAIL);
+		break;
+	case VL53L1_ERROR_OFFSET_CAL_NO_SPADS_ENABLED_FAIL:
+		VL53L1_COPYSTRING(pPalErrorString,
+			VL53L1_STRING_ERROR_OFFSET_CAL_NO_SPADS_ENABLED_FAIL);
+		break;
+	case VL53L1_ERROR_ZONE_CAL_NO_SAMPLE_FAIL:
+		VL53L1_COPYSTRING(pPalErrorString,
+			VL53L1_STRING_ERROR_ZONE_CAL_NO_SAMPLE_FAIL);
+		break;
+
+	case VL53L1_WARNING_OFFSET_CAL_MISSING_SAMPLES:
+		VL53L1_COPYSTRING(pPalErrorString,
+			VL53L1_STRING_WARNING_OFFSET_CAL_MISSING_SAMPLES);
+		break;
+	case VL53L1_WARNING_OFFSET_CAL_SIGMA_TOO_HIGH:
+		VL53L1_COPYSTRING(pPalErrorString,
+			VL53L1_STRING_WARNING_OFFSET_CAL_SIGMA_TOO_HIGH);
+		break;
+	case VL53L1_WARNING_OFFSET_CAL_RATE_TOO_HIGH:
+		VL53L1_COPYSTRING(pPalErrorString,
+			VL53L1_STRING_WARNING_OFFSET_CAL_RATE_TOO_HIGH);
+		break;
+	case VL53L1_WARNING_OFFSET_CAL_SPAD_COUNT_TOO_LOW:
+		VL53L1_COPYSTRING(pPalErrorString,
+			VL53L1_STRING_WARNING_OFFSET_CAL_SPAD_COUNT_TOO_LOW);
+		break;
+
+	case VL53L1_WARNING_ZONE_CAL_MISSING_SAMPLES:
+		VL53L1_COPYSTRING(pPalErrorString,
+			VL53L1_STRING_WARNING_ZONE_CAL_MISSING_SAMPLES);
+		break;
+	case VL53L1_WARNING_ZONE_CAL_SIGMA_TOO_HIGH:
+		VL53L1_COPYSTRING(pPalErrorString,
+			VL53L1_STRING_WARNING_ZONE_CAL_SIGMA_TOO_HIGH);
+		break;
+	case VL53L1_WARNING_ZONE_CAL_RATE_TOO_HIGH:
+		VL53L1_COPYSTRING(pPalErrorString,
+			VL53L1_STRING_WARNING_ZONE_CAL_RATE_TOO_HIGH);
+		break;
+
+	case VL53L1_WARNING_REF_SPAD_CHAR_NOT_ENOUGH_SPADS:
+		VL53L1_COPYSTRING(pPalErrorString,
+			VL53L1_STRING_WARNING_REF_SPAD_CHAR_NOT_ENOUGH_SPADS);
+		break;
+	case VL53L1_WARNING_REF_SPAD_CHAR_RATE_TOO_HIGH:
+		VL53L1_COPYSTRING(pPalErrorString,
+			VL53L1_STRING_WARNING_REF_SPAD_CHAR_RATE_TOO_HIGH);
+		break;
+	case VL53L1_WARNING_REF_SPAD_CHAR_RATE_TOO_LOW:
+		VL53L1_COPYSTRING(pPalErrorString,
+			VL53L1_STRING_WARNING_REF_SPAD_CHAR_RATE_TOO_LOW);
+		break;
+
+	case VL53L1_WARNING_XTALK_MISSING_SAMPLES:
+			VL53L1_COPYSTRING(pPalErrorString,
+				VL53L1_STRING_WARNING_XTALK_MISSING_SAMPLES);
+			break;
+	case VL53L1_WARNING_XTALK_NO_SAMPLES_FOR_GRADIENT:
+			VL53L1_COPYSTRING(pPalErrorString,
+				VL53L1_STRING_WARNING_XTALK_NO_SAMPLES_FOR_GRADIENT);
+			break;
+	case VL53L1_WARNING_XTALK_SIGMA_LIMIT_FOR_GRADIENT:
+			VL53L1_COPYSTRING(pPalErrorString,
+				VL53L1_STRING_WARNING_XTALK_SIGMA_LIMIT_FOR_GRADIENT);
+			break;
+
+	case VL53L1_ERROR_DEVICE_FIRMWARE_TOO_OLD:
 		VL53L1_COPYSTRING(pPalErrorString,
 			VL53L1_STRING_ERROR_DEVICE_FIRMWARE_TOO_OLD);
-	break;
-	case VL53L1_DEF_00165:
+		break;
+	case VL53L1_ERROR_DEVICE_FIRMWARE_TOO_NEW:
 		VL53L1_COPYSTRING(pPalErrorString,
 			VL53L1_STRING_ERROR_DEVICE_FIRMWARE_TOO_NEW);
-	break;
-	case VL53L1_DEF_00166:
+		break;
+	case VL53L1_ERROR_UNIT_TEST_FAIL:
 		VL53L1_COPYSTRING(pPalErrorString,
 			VL53L1_STRING_ERROR_UNIT_TEST_FAIL);
-	break;
-	case VL53L1_DEF_00167:
+		break;
+	case VL53L1_ERROR_FILE_READ_FAIL:
 		VL53L1_COPYSTRING(pPalErrorString,
 			VL53L1_STRING_ERROR_FILE_READ_FAIL);
-	break;
-	case VL53L1_DEF_00168:
+		break;
+	case VL53L1_ERROR_FILE_WRITE_FAIL:
 		VL53L1_COPYSTRING(pPalErrorString,
 			VL53L1_STRING_ERROR_FILE_WRITE_FAIL);
-	break;
-
+		break;
 	case VL53L1_ERROR_NOT_IMPLEMENTED:
 		VL53L1_COPYSTRING(pPalErrorString,
 			VL53L1_STRING_ERROR_NOT_IMPLEMENTED);
-	break;
-
+		break;
 	default:
 		VL53L1_COPYSTRING(pPalErrorString,
 				VL53L1_STRING_UNKNOW_ERROR_CODE);
@@ -246,6 +324,4 @@ VL53L1_Error VL53L1_get_pal_error_string(
 
 	return Status;
 }
-
-
 

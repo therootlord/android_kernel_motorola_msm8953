@@ -53,9 +53,9 @@
 		"womcl",	/* 36 */
 		"avaco",	/* 37 */
 		"retpe",	/* 38 */
-		"undefined",	/* 39 */
-		"undefined",	/* 40 */
-		"undefined",	/* 41 */
+		"openla",	/* 39 */
+		"opencl",	/* 40 */
+		"openmx",	/* 41 */
 		"undefined",	/* 42 */
 		"undefined",	/* 43 */
 		"undefined",	/* 44 */
@@ -107,12 +107,12 @@
 		"altpt",	/* 90 */
 		"timit",	/* 91 */
 		"retma",	/* 92 */
-		"undefined",	/* 93 */
-		"undefined",	/* 94 */
-		"undefined",	/* 95 */
-		"undefined",	/* 96 */
-		"undefined",	/* 97 */
-		"undefined",	/* 98 */
+		"windit",	/* 93 */
+		"vfhu",	        /* 94 */
+		"vfro",	        /* 95 */
+		"telhu",	/* 96 */
+		"playpl",	/* 97 */
+		"oraeu",	/* 98 */
 		"undefined",	/* 99 */
 		"undefined",	/* 100 */
 		"undefined",	/* 101 */
@@ -156,7 +156,7 @@
 		"usc",		/* 139 */
 		"tracfone",	/* 140 */
 		"retus",	/* 141 */
-		"???",		/* 142 */
+		"metropcs",	/* 142 */
 		"rcica",	/* 143 */
 		"wndca",	/* 144 */
 		"dmc",		/* 145 */
@@ -217,7 +217,7 @@
 		"cmcc",		/* 200 */
 		"ctcn",		/* 201 */
 		"cucn",		/* 202 */
-		"undefined",	/* 203 */
+		"retmm",	/* 203 */
 		"undefined",	/* 204 */
 		"undefined",	/* 205 */
 		"undefined",	/* 206 */

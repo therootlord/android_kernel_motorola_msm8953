@@ -31,6 +31,7 @@
 #include <linux/wakelock.h>
 #include <linux/mutex.h>
 #include <linux/cdev.h>
+#include <linux/i2c.h>
 
 #define HAPTICS_DEVICE_NAME "drv2624"
 
@@ -171,6 +172,11 @@ enum actuator_type {
 	LRA
 };
 
+enum work_mode {
+	NORMAL,
+	REDUCED
+};
+
 enum loop_type {
 	CLOSE_LOOP,
 	OPEN_LOOP
@@ -178,8 +184,11 @@ enum loop_type {
 
 struct actuator_data {
 	enum actuator_type meActuatorType;
+	enum work_mode meWorkMode;
 	unsigned char mnRatedVoltage;
 	unsigned char mnOverDriveClampVoltage;
+	unsigned char mnRatedVoltageReduced;
+	unsigned char mnOverDriveClampVoltageReduced;
 	unsigned char mnLRAFreq;
 	unsigned char mnSampleTime;
 
@@ -229,6 +238,7 @@ struct drv2624_platform_data {
 	int mnGpioNRST;
 	int mnGpioNPWR;
 	int mnGpioINT;
+	int mnGpioVCTRL;
 	enum loop_type meLoop;
 	struct actuator_data msActuator;
 	bool auto_cal;
@@ -248,6 +258,7 @@ struct drv2624_fw_header {
 struct drv2624_data {
 	struct drv2624_platform_data msPlatData;
 	unsigned char mnDeviceID;
+	struct i2c_client *i2c_client;
 	struct device *dev;
 	struct regmap *mpRegmap;
 	unsigned char mnIntStatus;
@@ -256,6 +267,11 @@ struct drv2624_data {
 	int mnVibratorPlaying;
 	char mnWorkMode;
 	unsigned char mnCurrentReg;
+	int mnCurrentVibrationTime;
+	bool factory_mode;
+	bool reduced_pwr_capable;
+
+	atomic_t reduce_pwr;
 
 	struct wake_lock wklock;
 	struct hrtimer timer;

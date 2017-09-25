@@ -358,8 +358,14 @@ static int32_t afe_callback(struct apr_client_data *data, void *priv)
 			/* payload[1] contains the error status for response */
 			if (payload[1] != 0) {
 				atomic_set(&this_afe.status, payload[1]);
-				pr_err("%s: cmd = 0x%x returned error = 0x%x\n",
-					__func__, payload[0], payload[1]);
+				if (payload[0] == AFE_PORT_CMD_SET_PARAM_V2)
+					pr_debug("%s: cmd = 0x%x returned error = 0x%x\n",
+						__func__,
+						payload[0], payload[1]);
+				else
+					pr_err("%s: cmd = 0x%x returned error = 0x%x\n",
+						__func__,
+						payload[0], payload[1]);
 			}
 			switch (payload[0]) {
 			case AFE_PORT_CMD_SET_PARAM_V2:
@@ -660,6 +666,7 @@ int afe_q6_interface_prepare(void)
 static int afe_apr_send_pkt(void *data, wait_queue_head_t *wait)
 {
 	int ret;
+	struct afe_audioif_config_command_no_payload *afe_cal = data;
 
 	if (wait)
 		atomic_set(&this_afe.state, 1);
@@ -673,9 +680,19 @@ static int afe_apr_send_pkt(void *data, wait_queue_head_t *wait)
 			if (!ret) {
 				ret = -ETIMEDOUT;
 			} else if (atomic_read(&this_afe.status) > 0) {
-				pr_err("%s: DSP returned error[%s]\n", __func__,
-					adsp_err_get_err_str(atomic_read(
-					&this_afe.status)));
+				if (afe_cal->hdr.opcode ==
+				    AFE_PORT_CMD_SET_PARAM_V2)
+					pr_debug("%s: DSP returned error[%s]\n",
+						__func__,
+						adsp_err_get_err_str(
+							atomic_read(
+							&this_afe.status)));
+				else
+					pr_err("%s: DSP returned error[%s]\n",
+						__func__,
+						adsp_err_get_err_str(
+							atomic_read(
+							&this_afe.status)));
 				ret = adsp_err_get_lnx_err_code(
 						atomic_read(&this_afe.status));
 			} else {
@@ -1282,7 +1299,7 @@ static int afe_get_cal_topology_id(u16 port_id, u32 *topology_id)
 	cal_block = afe_find_cal_topo_id_by_port(
 		this_afe.cal_data[AFE_TOPOLOGY_CAL], port_id);
 	if (cal_block == NULL) {
-		pr_err("%s: [AFE_TOPOLOGY_CAL] not initialized for this port %d\n",
+		pr_debug("%s: [AFE_TOPOLOGY_CAL] not initialized for this port %d\n",
 				__func__, port_id);
 		ret = -EINVAL;
 		goto unlock;
@@ -4314,7 +4331,7 @@ static ssize_t afe_debug_write(struct file *filp,
 
 	lbuf[cnt] = '\0';
 
-	if (!strncmp(lb_str, "afe_loopback", 12)) {
+	if (!strcmp(lb_str, "afe_loopback")) {
 		rc = afe_get_parameters(lbuf, param, 3);
 		if (!rc) {
 			pr_info("%s: %lu %lu %lu\n", lb_str, param[0], param[1],
@@ -4343,7 +4360,7 @@ static ssize_t afe_debug_write(struct file *filp,
 			rc = -EINVAL;
 		}
 
-	} else if (!strncmp(lb_str, "afe_loopback_gain", 17)) {
+	} else if (!strcmp(lb_str, "afe_loopback_gain")) {
 		rc = afe_get_parameters(lbuf, param, 2);
 		if (!rc) {
 			pr_info("%s: %s %lu %lu\n",
@@ -6232,6 +6249,7 @@ static int afe_map_cal_data(int32_t cal_type,
 	}
 
 
+	mutex_lock(&this_afe.afe_cmd_lock);
 	atomic_set(&this_afe.mem_map_cal_index, cal_index);
 	ret = afe_cmd_memory_map(cal_block->cal_data.paddr,
 			cal_block->map_data.map_size);
@@ -6244,10 +6262,12 @@ static int afe_map_cal_data(int32_t cal_type,
 			__func__,
 			&cal_block->cal_data.paddr,
 			cal_block->map_data.map_size);
+		mutex_unlock(&this_afe.afe_cmd_lock);
 		goto done;
 	}
 	cal_block->map_data.q6map_handle = atomic_read(&this_afe.
 		mem_map_cal_handles[cal_index]);
+	mutex_unlock(&this_afe.afe_cmd_lock);
 done:
 	return ret;
 }

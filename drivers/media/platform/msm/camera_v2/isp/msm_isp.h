@@ -160,6 +160,8 @@ struct msm_vfe_irq_ops {
 	void (*config_irq)(struct vfe_device *vfe_dev,
 		uint32_t irq_status0, uint32_t irq_status1,
 		enum msm_isp_irq_operation);
+	void (*process_eof_irq)(struct vfe_device *vfe_dev,
+		uint32_t irq_status0);
 };
 
 struct msm_vfe_axi_ops {
@@ -476,6 +478,8 @@ struct msm_vfe_src_info {
 	struct timeval time_stamp;
 	enum msm_vfe_dual_hw_type dual_hw_type;
 	struct msm_vfe_dual_hw_ms_info dual_hw_ms_info;
+	uint32_t eof_id;
+	bool accept_frame;
 };
 
 struct msm_vfe_fetch_engine_info {
@@ -777,6 +781,7 @@ struct vfe_device {
 	/* before halt irq info */
 	uint32_t recovery_irq0_mask;
 	uint32_t recovery_irq1_mask;
+	uint32_t ms_frame_id;
 };
 
 struct vfe_parent_device {

@@ -120,6 +120,14 @@
 #define	FLASH_LED_CURRENT_READING_DELAY_MAX			5001
 #define	FLASH_LED_OPEN_FAULT_DETECTED				0xC
 
+/* Bit by bit decodeing of the fault status */
+#define	FLASH_VREG_OK_FAULT					0x20
+#define	FLASH_THERMAL_DERATE					0x10
+#define	FLASH_LED2_OPEN_FAULT					0x8
+#define	FLASH_LED1_OPEN_FAULT					0x4
+#define	FLASH_LED2_SHORT_FAULT					0x2
+#define	FLASH_LED1_SHORT_FAULT					0x1
+
 #define FLASH_UNLOCK_SECURE					0xA5
 #define FLASH_LED_TORCH_ENABLE					0x00
 #define FLASH_LED_TORCH_DISABLE					0x03
@@ -267,6 +275,7 @@ struct qpnp_flash_led {
 };
 
 static u8 qpnp_flash_led_ctrl_dbg_regs[] = {
+	0x08,
 	0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48,
 	0x4A, 0x4B, 0x4C, 0x4F, 0x51, 0x52, 0x54, 0x55, 0x5A, 0x5C, 0x5D,
 };
@@ -1247,6 +1256,91 @@ error_regulator_enable:
 	return rc;
 }
 
+
+static int qpnp_check_fault(struct qpnp_flash_led *led)
+{
+	int rc;
+	u8 val;
+
+	if (!led->pdata->self_check_en)
+		return false;
+
+	/*
+	 * Checking LED fault status detects hardware open fault.
+	 */
+	rc = spmi_ext_register_readl(led->spmi_dev->ctrl,
+		led->spmi_dev->sid,
+		FLASH_LED_FAULT_STATUS(led->base), &val, 1);
+	if (rc) {
+		dev_err(&led->spmi_dev->dev,
+			"Failed to read out fault status register\n");
+		return rc;
+	}
+
+	if (val) {
+		dev_info(&led->spmi_dev->dev, "%s fault register %#x\n", __func__, val);
+		dev_info(&led->spmi_dev->dev, ">> %s%s%s%s%s%s\n",
+			val & FLASH_VREG_OK_FAULT ? "FLASH_VREG_OK_FAULT ":"",
+			val & FLASH_THERMAL_DERATE ? "FLASH_THERMAL_DERATE ":"",
+			val & FLASH_LED2_OPEN_FAULT ? "FLASH_LED2_OPEN_FAULT ":"",
+			val & FLASH_LED1_OPEN_FAULT ? "FLASH_LED1_OPEN_FAULT ":"",
+			val & FLASH_LED2_SHORT_FAULT ? "FLASH_LED2_SHORT_FAULT ":"",
+			val & FLASH_LED1_SHORT_FAULT ? "FLASH_LED1_SHORT_FAULT ":""
+		);
+	}
+
+	led->open_fault = (val & FLASH_LED_OPEN_FAULT_DETECTED);
+
+	if (led->open_fault) {
+		/* If a fault was detected;
+		   reset fault detection and check again to make
+		   sure fault is still active */
+		rc = qpnp_led_masked_write(led->spmi_dev,
+					FLASH_FAULT_DETECT(led->base),
+					FLASH_FAULT_DETECT_MASK,
+					FLASH_LED_DISABLE);
+		if (rc) {
+			dev_err(&led->spmi_dev->dev,
+				"Fault detect reg write failed\n");
+				return rc;
+		}
+		udelay(2000);
+		rc = qpnp_led_masked_write(led->spmi_dev,
+					FLASH_FAULT_DETECT(led->base),
+					FLASH_FAULT_DETECT_MASK,
+					FLASH_MODULE_ENABLE);
+		if (rc) {
+			dev_err(&led->spmi_dev->dev,
+				"Fault detect reg write failed\n");
+				return rc;
+		}
+		udelay(2000);
+		rc = spmi_ext_register_readl(led->spmi_dev->ctrl,
+			led->spmi_dev->sid,
+			FLASH_LED_FAULT_STATUS(led->base), &val, 1);
+		if (rc) {
+			dev_err(&led->spmi_dev->dev,
+				"Failed to read out fault status register\n");
+			return rc;
+		}
+
+		if (val) {
+			dev_info(&led->spmi_dev->dev, "%s after retry fault register %#x\n", __func__, val);
+			dev_info(&led->spmi_dev->dev, ">> %s%s%s%s%s%s\n",
+				val & FLASH_VREG_OK_FAULT ? "FLASH_VREG_OK_FAULT ":"",
+				val & FLASH_THERMAL_DERATE ? "FLASH_THERMAL_DERATE ":"",
+				val & FLASH_LED2_OPEN_FAULT ? "FLASH_LED2_OPEN_FAULT ":"",
+				val & FLASH_LED1_OPEN_FAULT ? "FLASH_LED1_OPEN_FAULT ":"",
+				val & FLASH_LED2_SHORT_FAULT ? "FLASH_LED2_SHORT_FAULT ":"",
+				val & FLASH_LED1_SHORT_FAULT ? "FLASH_LED1_SHORT_FAULT ":""
+			);
+		}
+		led->open_fault = (val & FLASH_LED_OPEN_FAULT_DETECTED);
+	}
+	return led->open_fault;
+}
+
+
 static void qpnp_flash_led_work(struct work_struct *work)
 {
 	struct flash_node_data *flash_node = container_of(work,
@@ -1269,7 +1363,7 @@ static void qpnp_flash_led_work(struct work_struct *work)
 	if (!brightness)
 		goto turn_off;
 
-	if (led->open_fault) {
+	if (qpnp_check_fault(led)) {
 		dev_err(&led->spmi_dev->dev, "Open fault detected\n");
 		goto unlock_mutex;
 	}
@@ -1763,23 +1857,8 @@ unlock_mutex:
 	return;
 
 turn_off:
-	if (flash_node->type == TORCH) {
-		/*
-		 * Checking LED fault status detects hardware open fault.
-		 * If fault occurs, all subsequent LED enablement requests
-		 * will be rejected to protect hardware.
-		 */
-		rc = spmi_ext_register_readl(led->spmi_dev->ctrl,
-			led->spmi_dev->sid,
-			FLASH_LED_FAULT_STATUS(led->base), &val, 1);
-		if (rc) {
-			dev_err(&led->spmi_dev->dev,
-				"Failed to read out fault status register\n");
-			goto exit_flash_led_work;
-		}
-
-		led->open_fault |= (val & FLASH_LED_OPEN_FAULT_DETECTED);
-	}
+	if (qpnp_check_fault(led))
+		dev_err(&led->spmi_dev->dev, "Open fault detected\n");
 
 	rc = qpnp_led_masked_write(led->spmi_dev,
 			FLASH_LED_STROBE_CTRL(led->base),

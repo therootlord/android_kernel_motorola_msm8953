@@ -44,7 +44,7 @@
 #include <linux/regulator/consumer.h>
 #include <linux/spi/spi.h>
 #include <soc/qcom/scm.h>
-
+#include <linux/wakelock.h>
 
 #include "et320.h"
 #include "navi_input.h"
@@ -54,7 +54,7 @@
 #define	LEVEL_TRIGGER_LOW       0x2
 #define	LEVEL_TRIGGER_HIGH      0x3
 #define EGIS_NAVI_INPUT 1  /* 1:open ; 0:close */
-
+struct wake_lock et320_wake_lock;
 
 /*
  * FPS interrupt table
@@ -81,7 +81,7 @@ int detect_threshold;
 };
 /* To be compatible with fpc driver */
 #ifndef CONFIG_SENSORS_FPC_1020
-struct FPS_data {
+static struct FPS_data {
 	unsigned int enabled;
 	unsigned int state;
 	struct blocking_notifier_head nhead;
@@ -89,24 +89,27 @@ struct FPS_data {
 
 struct FPS_data *FPS_init(void)
 {
-	struct FPS_data *mdata = kzalloc(
-			sizeof(struct FPS_data), GFP_KERNEL);
-	if (mdata) {
-		BLOCKING_INIT_NOTIFIER_HEAD(&mdata->nhead);
-		pr_debug("%s: FPS notifier data structure init-ed\n", __func__);
+	struct FPS_data *mdata;
+	if (!fpsData) {
+		mdata = kzalloc(
+				sizeof(struct FPS_data), GFP_KERNEL);
+		if (mdata) {
+			BLOCKING_INIT_NOTIFIER_HEAD(&mdata->nhead);
+			pr_debug("%s: FPS notifier data structure init-ed\n", __func__);
+		}
+		fpsData = mdata;
 	}
-	return mdata;
+	return fpsData;
 }
-
 int FPS_register_notifier(struct notifier_block *nb,
 	unsigned long stype, bool report)
 {
 	int error;
 	struct FPS_data *mdata = fpsData;
 
+	mdata = FPS_init();
 	if (!mdata)
 		return -ENODEV;
-
 	mdata->enabled = (unsigned int)stype;
 	pr_debug("%s: FPS sensor %lu notifier enabled\n", __func__, stype);
 
@@ -155,12 +158,12 @@ void FPS_notify(unsigned long stype, int state)
 	}
 
 	pr_debug("%s: FPS current state %d -> (0x%x)\n", __func__,
-	       mdata->state, state);
+		mdata->state, state);
 
 	if (mdata->enabled && mdata->state != state) {
 		mdata->state = state;
 		blocking_notifier_call_chain(&mdata->nhead,
-					     stype, (void *)&state);
+						stype, (void *)&state);
 		pr_debug("%s: FPS notification sent\n", __func__);
 	} else if (!mdata->enabled) {
 		pr_err("%s: !mdata->enabled", __func__);
@@ -221,6 +224,7 @@ static irqreturn_t fp_eint_func(int irq, void *dev_id)
 		mod_timer(&fps_ints.timer, jiffies + msecs_to_jiffies(fps_ints.detect_period));
 	fps_ints.int_count++;
 	/* printk_ratelimited(KERN_WARNING "-----------   zq fp fp_eint_func  ,fps_ints.int_count=%d",fps_ints.int_count);*/
+	wake_lock_timeout(&et320_wake_lock, msecs_to_jiffies(1500));
 	return IRQ_HANDLED;
 }
 
@@ -232,6 +236,8 @@ static irqreturn_t fp_eint_func_ll(int irq , void *dev_id)
 	disable_irq_nosync(gpio_irq);
 	fps_ints.drdy_irq_flag = DRDY_IRQ_DISABLE;
 	wake_up_interruptible(&interrupt_waitq);
+	/* printk_ratelimited(KERN_WARNING "-----------   zq fp fp_eint_func  ,fps_ints.int_count=%d",fps_ints.int_count);*/
+	wake_lock_timeout(&et320_wake_lock, msecs_to_jiffies(1500));
 	return IRQ_RETVAL(IRQ_HANDLED);
 }
 
@@ -416,7 +422,23 @@ static ssize_t etspi_write(struct file *filp,
 	/*Implement by vendor if needed*/
 	return 0;
 }
+static ssize_t etspi_enable_set(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t count)
+{
+	int state = (*buf == '1') ? 1 : 0;
+	FPS_notify(0xbeef, state);
+	DEBUG_PRINT("%s  state = %d\n", __func__, state);
+	return 1;
+}
+static DEVICE_ATTR(etspi_enable, S_IWUSR | S_IWGRP, NULL, etspi_enable_set);
+static struct attribute *attributes[] = {
+	&dev_attr_etspi_enable.attr,
+	NULL
+};
 
+static const struct attribute_group attribute_group = {
+	.attrs = attributes,
+};
 static long etspi_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
 
@@ -729,12 +751,13 @@ static struct platform_driver etspi_driver = {
 
 static int etspi_remove(struct platform_device *pdev)
 {
-    DEBUG_PRINT("%s(#%d)\n", __func__, __LINE__);
+	DEBUG_PRINT("%s(#%d)\n", __func__, __LINE__);
 	free_irq(gpio_irq, NULL);
 	del_timer_sync(&fps_ints.timer);
+	wake_lock_destroy(&et320_wake_lock);
 	request_irq_done = 0;
 	/* t_mode = 255; */
-    return 0;
+	return 0;
 }
 
 static int etspi_probe(struct platform_device *pdev)
@@ -854,14 +877,16 @@ static int etspi_probe(struct platform_device *pdev)
 	/* the timer is for ET310 */
 	setup_timer(&fps_ints.timer, interrupt_timer_routine, (unsigned long)&fps_ints);
 	add_timer(&fps_ints.timer);
-
+	wake_lock_init(&et320_wake_lock, WAKE_LOCK_SUSPEND, "et320_wake_lock");
 	DEBUG_PRINT("  add_timer ---- \n");
 	DEBUG_PRINT("%s : initialize success %d\n",
 		__func__, status);
-/* To be compatible with FPC driver*/
-#ifndef CONFIG_SENSORS_FPC_1020
-    fpsData = FPS_init();
-#endif
+
+	status = sysfs_create_group(&dev->kobj, &attribute_group);
+	if (status) {
+		pr_err("%s could not create sysfs\n", __func__);
+		goto etspi_probe_failed;
+	}
 	request_irq_done = 0;
 	return status;
 
@@ -881,9 +906,10 @@ etspi_probe_parse_dt_failed:
 	return status;
 }
 
-static int __init eg320_init(void)
+static int __init et320_init(void)
 {
 	int status = 0;
+	DEBUG_PRINT("%s  enter\n", __func__);
 #if 0
 	/* fp_id is used only when dual sensor need to be support  */
 	struct device_node *fp_id_np = NULL;
@@ -911,16 +937,18 @@ static int __init eg320_init(void)
     }
 #endif
 	status = platform_driver_register(&etspi_driver);
+	DEBUG_PRINT("%s  done\n", __func__);
+
 	return status;
 }
 
-static void __exit eg320_exit(void)
+static void __exit et320_exit(void)
 {
 	platform_driver_unregister(&etspi_driver);
 }
 
-module_init(eg320_init);
-module_exit(eg320_exit);
+module_init(et320_init);
+module_exit(et320_exit);
 
 MODULE_AUTHOR("Wang YuWei, <robert.wang@egistec.com>");
 MODULE_DESCRIPTION("SPI Interface for ET320");

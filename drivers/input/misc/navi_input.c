@@ -20,7 +20,16 @@ enum {
 #define	DISABLE		0
 #define	ENABLE		1
 
+static struct task_struct *nav_kthread;
+static DECLARE_WAIT_QUEUE_HEAD(nav_input_wait);
+static unsigned int nav_input_sig;
+static DEFINE_MUTEX(driver_mode_lock);
+struct navi_cmd_struct {
+	char cmd;
+	struct list_head list;
+};
 
+struct navi_cmd_struct cmd_list;
 
 /*****************************************************************
 *                                                                *
@@ -44,8 +53,9 @@ enum {
  *     DISABLE : Ignore swipe-left & swipe-right navigation events.
  *               Don't care properties.
  */
-#define ENABLE_SWIPE_UP_DOWN	ENABLE
+#define ENABLE_SWIPE_UP_DOWN	DISABLE
 #define ENABLE_SWIPE_LEFT_RIGHT	ENABLE
+#define ENABLE_FINGER_DOWN_UP	ENABLE
 #define KEY_FPS_DOWN   614
 #define KEY_FPS_UP     615
 #define KEY_FPS_TAP    616
@@ -54,7 +64,7 @@ enum {
 #define KEY_FPS_YMINUS 619
 #define KEY_FPS_XPLUS  620
 #define KEY_FPS_XMINUS 621
-#define KEY_FPS_DBLTAP 622
+
 
 /*
  * ENABLE_SWIPE_UP_DOWN properties
@@ -100,10 +110,9 @@ enum {
 #define	KEYEVENT_RIGHT_ACTION	KEY_PRESS_RELEASE
 #define	KEYEVENT_LEFT			KEY_FPS_YPLUS  /* KEY_LEFT */
 #define	KEYEVENT_LEFT_ACTION	KEY_PRESS_RELEASE
-
-
-
-
+#if ENABLE_FINGER_DOWN_UP
+unsigned int prev_keycode = 0;
+#endif
 /*
  * @ TRANSLATED_COMMAND
  *     ENABLE : TRANSLATED command. Navigation events will be translated to
@@ -134,7 +143,7 @@ enum {
  *     ENABLE/DISABLE : enable/disable long-touch event.
  */
 #define ENABLE_TRANSLATED_SINGLE_CLICK	ENABLE
-#define ENABLE_TRANSLATED_DOUBLE_CLICK	ENABLE
+#define ENABLE_TRANSLATED_DOUBLE_CLICK	DISABLE
 #define ENABLE_TRANSLATED_LONG_TOUCH	ENABLE
 
 
@@ -164,14 +173,19 @@ enum {
  *   KEY_RELEASE : Release key button
  *   KEY_PRESS_RELEASE : Combined action of press-then-release
  */
-#define LONGTOUCH_INTERVAL			333
-#define DOUBLECLICK_INTERVAL		500
-#define	KEYEVENT_CLICK				KEY_FPS_TAP /* 0x232 */
-#define	KEYEVENT_CLICK_ACTION		KEY_PRESS_RELEASE
-#define	KEYEVENT_DOUBLECLICK		KEY_FPS_DBLTAP
-#define	KEYEVENT_DOUBLECLICK_ACTION	KEY_PRESS_RELEASE
-#define	KEYEVENT_LONGTOUCH			KEY_FPS_HOLD /* 0x233 */
-#define	KEYEVENT_LONGTOUCH_ACTION	KEY_PRESS_RELEASE
+#define LONGTOUCH_INTERVAL          400
+#define DOUBLECLICK_INTERVAL        500
+#define	KEYEVENT_CLICK              KEY_FPS_TAP /* 0x232 */
+#define	KEYEVENT_CLICK_ACTION       KEY_PRESS_RELEASE
+#define	KEYEVENT_DOUBLECLICK        KEY_DELETE
+#define	KEYEVENT_DOUBLECLICK_ACTION KEY_PRESS_RELEASE
+#define	KEYEVENT_LONGTOUCH          KEY_FPS_HOLD /* 0x233 */
+#define	KEYEVENT_LONGTOUCH_ACTION   KEY_PRESS_RELEASE
+
+#define	KEYEVENT_ON                 KEY_FPS_DOWN
+#define	KEYEVENT_ON_ACTION          KEY_PRESS_RELEASE
+#define	KEYEVENT_OFF                KEY_FPS_UP
+#define	KEYEVENT_OFF_ACTION         KEY_PRESS_RELEASE
 
 
 /*---------------End of TRANSLATED properties-----------------*/
@@ -263,7 +277,7 @@ enum navi_event {
 };
 
 static struct timer_list long_touch_timer;
-struct navi_struct navi_work_queue;
+
 static bool g_KeyEventRaised = true;
 static unsigned long g_DoubleClickJiffies;
 
@@ -274,6 +288,8 @@ void init_event_enable(struct etspi_data *etspi)
 	set_bit(EV_KEY, etspi->input_dev->evbit);
 	set_bit(EV_SYN, etspi->input_dev->evbit);
 #if TRANSLATED_COMMAND
+	set_bit(KEYEVENT_ON, etspi->input_dev->keybit);
+	set_bit(KEYEVENT_OFF, etspi->input_dev->keybit);
 	set_bit(KEYEVENT_CLICK, etspi->input_dev->keybit);
 	set_bit(KEYEVENT_DOUBLECLICK, etspi->input_dev->keybit);
 	set_bit(KEYEVENT_LONGTOUCH, etspi->input_dev->keybit);
@@ -302,6 +318,9 @@ static void send_key_event(struct etspi_data *etspi, unsigned int code, int valu
 		input_sync(obj->input_dev);
 		input_report_key(obj->input_dev, code, 0);	/* 0 is release */
 		input_sync(obj->input_dev);
+#if ENABLE_FINGER_DOWN_UP
+		prev_keycode = code;
+#endif
 	} else {
 		input_report_key(obj->input_dev, code, value);
 		input_sync(obj->input_dev);
@@ -340,6 +359,9 @@ void translated_command_converter(char cmd, struct etspi_data *etspi)
 
 	case NAVI_EVENT_ON:
 		g_KeyEventRaised = false;
+#if ENABLE_FINGER_DOWN_UP
+		send_key_event(etspi, KEYEVENT_ON, KEYEVENT_ON_ACTION);
+#endif
 #if ENABLE_TRANSLATED_LONG_TOUCH
 		long_touch_timer.data = (unsigned long)etspi;
 		mod_timer(&long_touch_timer, jiffies + (HZ * LONGTOUCH_INTERVAL / 1000));
@@ -370,29 +392,34 @@ void translated_command_converter(char cmd, struct etspi_data *etspi)
 
 #endif	/* end of ENABLE_DOUBLE_CLICK */
 		}
+#if ENABLE_FINGER_DOWN_UP
+		else	{
+			if (prev_keycode == KEYEVENT_LONGTOUCH)
+				send_key_event(etspi, KEYEVENT_OFF, KEYEVENT_OFF_ACTION);
+		}
+#endif
 #if ENABLE_TRANSLATED_LONG_TOUCH
 		del_timer(&long_touch_timer);
 #endif
 		break;
 
 	case NAVI_EVENT_UP:
-
-#if ENABLE_SWIPE_UP_DOWN
 		if (g_KeyEventRaised == false) {
 			g_KeyEventRaised = true;
+#if ENABLE_SWIPE_UP_DOWN
 			send_key_event(etspi, KEYEVENT_UP, KEYEVENT_UP_ACTION);
-		}
 #endif
+		}
 		break;
 
 	case NAVI_EVENT_DOWN:
 
-		#if ENABLE_SWIPE_UP_DOWN
 		if (g_KeyEventRaised == false) {
 			g_KeyEventRaised = true;
+#if ENABLE_SWIPE_UP_DOWN
 			send_key_event(etspi, KEYEVENT_DOWN, KEYEVENT_DOWN_ACTION);
+#endif
 		}
-		#endif
 
 	break;
 
@@ -509,6 +536,7 @@ static ssize_t navigation_event_func(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t count)
 {
 	struct etspi_data *etspi = dev_get_drvdata(dev);
+	struct navi_cmd_struct *tempcmd;
 	DEBUG_PRINT("Egis navigation driver, %s echo :'%d'\n", __func__, *buf);
 
 	if (etspi) {
@@ -521,11 +549,18 @@ static ssize_t navigation_event_func(struct device *dev,
 
 	if (etspi->input_dev == NULL)
 		pr_err("Egis navigation driver, etspi->input_dev is NULL\n");
+	tempcmd = kmalloc(sizeof(*tempcmd), GFP_KERNEL);
+	if (tempcmd != NULL) {
+		mutex_lock(&driver_mode_lock);
+		tempcmd->cmd = *buf;
+		list_add_tail(&tempcmd->list, &cmd_list.list);
+		nav_input_sig = 1;
+		mutex_unlock(&driver_mode_lock);
+		wake_up_interruptible(&nav_input_wait);
+	} else {
+		pr_err("navigation_event_func kmalloc failed\n");
 
-	navi_work_queue.cmd = *buf;
-	navi_work_queue.etspi = etspi;
-	if (schedule_work(&(navi_work_queue.workq)) == 0)
-		pr_err("Egis navigation driver, etspi is NULL\n");
+	}
 	return count;
 }
 static DEVICE_ATTR(navigation_event, S_IWUSR, NULL, navigation_event_func);
@@ -574,6 +609,34 @@ static const struct attribute_group attribute_group = {
 
 
 /*-------------------------------------------------------------------------*/
+static int nav_input_thread(void *et_spi)
+{
+	struct etspi_data *etspi = et_spi;
+	struct navi_cmd_struct *tempcmd, *acmd;
+
+	set_user_nice(current, -20);
+	DEBUG_PRINT("nav_input_thread enter\n");
+
+	while (1) {
+		wait_event_interruptible(nav_input_wait,
+			nav_input_sig || kthread_should_stop());
+		mutex_lock(&driver_mode_lock);
+		list_for_each_entry_safe(acmd, tempcmd, &cmd_list.list, list) {
+			translated_command_converter(acmd->cmd, etspi);
+			list_del(&acmd->list);
+			kfree(acmd);
+		}
+		nav_input_sig = 0;
+		mutex_unlock(&driver_mode_lock);
+		if (kthread_should_stop())
+			break;
+	}
+
+
+	DEBUG_PRINT("nav_input_thread exit\n");
+
+	return 0;
+}
 
 
 void uinput_egis_init(struct etspi_data *etspi)
@@ -591,8 +654,12 @@ void uinput_egis_init(struct etspi_data *etspi)
 	}
 
 
-	INIT_WORK(&(navi_work_queue.workq), navi_operator);
-
+	INIT_LIST_HEAD(&cmd_list.list);
+	nav_input_sig = 0;
+	if (!nav_kthread) {
+		nav_kthread = kthread_run(nav_input_thread,
+			(void *)etspi, "nav_thread");
+	}
 #if ENABLE_TRANSLATED_LONG_TOUCH
 	init_timer(&long_touch_timer);
 	long_touch_timer.function = long_touch_handler;
@@ -616,7 +683,6 @@ void uinput_egis_destroy(struct etspi_data *etspi)
 {
 	DEBUG_PRINT("Egis navigation driver, %s\n", __func__);
 
-	destroy_workqueue((void *) &(navi_work_queue.workq));
 
 #if ENABLE_TRANSLATED_LONG_TOUCH
 	del_timer(&long_touch_timer);
@@ -624,6 +690,10 @@ void uinput_egis_destroy(struct etspi_data *etspi)
 
 	if (etspi->input_dev != NULL)
 		input_free_device(etspi->input_dev);
+	if (nav_kthread)
+		kthread_stop(nav_kthread);
+
+	nav_kthread = NULL;
 }
 
 

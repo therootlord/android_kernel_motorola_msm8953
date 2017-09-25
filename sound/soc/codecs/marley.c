@@ -1672,6 +1672,8 @@ static const struct snd_soc_dapm_route marley_dapm_routes[] = {
 	{ "AEC Loopback", "SPKDATR", "OUT5R" },
 	{ "SPKDATL", NULL, "OUT5L" },
 	{ "SPKDATR", NULL, "OUT5R" },
+	{ "SPKDAT Capture", NULL, "SPKDATL" },
+	{ "SPKDAT Capture", NULL, "SPKDATR" },
 
 	{ "SPDIF", NULL, "SPD1" },
 
@@ -1805,6 +1807,17 @@ static struct snd_soc_dai_driver marley_dai[] = {
 			 .formats = MARLEY_FORMATS,
 		 },
 		.ops = &arizona_slim_dai_ops,
+	},
+	{
+		.name = "marley-pdm",
+		.id = 6,
+		.capture = {
+			.stream_name = "SPKDAT Capture",
+			.channels_min = 1,
+			.channels_max = 2,
+			.rates = MARLEY_RATES,
+			.formats = MARLEY_FORMATS,
+		},
 	},
 	{
 		.name = "marley-cpu-voicectrl",
@@ -1988,13 +2001,13 @@ static int marley_panic_check(struct marley_priv *marley, int dev, int *reg)
 	scratch1 = val;
 	memset(err_msg, 0, sizeof(err_msg));
 
-	err_msg[0] = (u16)val;
-	regmap_read(arizona->regmap, *reg-1, &val);
+	regmap_read(arizona->regmap_32bit, *reg, &val);
 	err_msg[1] = (u16)val;
-	regmap_read(arizona->regmap, *reg+1, &val);
+	err_msg[0] = (u16)(val >> 16);
+
+	regmap_read(arizona->regmap_32bit, *reg+2, &val);
 	err_msg[2] = (u16)val;
-	regmap_read(arizona->regmap, *reg+2, &val);
-	err_msg[3] = (u16)val;
+	err_msg[3] = (u16)(val >> 16);
 
 	/* Panic callback */
 	if (marley->core.arizona->pdata.ez2panic_trigger)

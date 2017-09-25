@@ -292,9 +292,15 @@ dtb-$(CONFIG_ARCH_MSM8953) += msm8953-albus-p3.dtb
 dtb-$(CONFIG_ARCH_MSM8953) += msm8953-albus-p4.dtb
 endif
 
+ifeq ($(CONFIG_JOHNSON_DTB),y)
+dtb-$(CONFIG_ARCH_MSM8953) += msm8953-johnson-p0.dtb
+endif
+
 ifeq ($(CONFIG_SANDERS_DTB),y)
 dtb-$(CONFIG_ARCH_MSM8953) += msm8953-sanders-p1.dtb \
-	msm8953-sanders-p2.dtb
+	msm8953-sanders-p2.dtb \
+	msm8953-sanders-p3.dtb \
+	msm8953-sanders-p4.dtb
 endif
 
 ifeq ($(CONFIG_PERRY_DTB),y)
@@ -303,6 +309,7 @@ dtb-$(CONFIG_ARCH_MSM8920) += msm8920-perry-p1.dtb
 endif
 
 ifeq ($(CONFIG_OWENS_DTB),y)
+dtb-$(CONFIG_ARCH_MSM8920) += msm8920-owens-p0.dtb
 dtb-$(CONFIG_ARCH_MSM8920) += msm8920-owens-p1.dtb
 endif
 
@@ -315,12 +322,12 @@ dtb-$(CONFIG_ARCH_MSM8937) += msm8937-cedric-p1.dtb \
 endif
 
 ifeq ($(CONFIG_MONTANA_DTB),y)
-dtb-$(CONFIG_ARCH_MSM8937) += msm8937-montana-p0.dtb
+dtb-$(CONFIG_ARCH_MSM8937) += msm8937-montana-p0.dtb \
+	msm8937-montana-p1a.dtb \
+	msm8937-montana-p1b.dtb \
+	msm8937-montana-p2.dtb \
+	msm8937-montana-p3.dtb
 endif
-
-dtb-$(CONFIG_ARCH_SDM450) += sdm450-rcm.dtb \
-	sdm450-cdp.dtb \
-	sdm450-mtp.dtb
 
 dtb-$(CONFIG_ARCH_MDM9607) += mdm9607-rumi.dtb \
 	mdm9607-cdp.dtb \

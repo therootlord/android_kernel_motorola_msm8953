@@ -2,7 +2,8 @@
 /*
 * Copyright (c) 2016, STMicroelectronics - All Rights Reserved
 *
-* This file is part of VL53L1 Core and is dual licensed, either 'STMicroelectronics Proprietary license'
+* This file is part of VL53L1 Core and is dual licensed, either 'STMicroelectronics
+* Proprietary license'
 * or 'BSD 3-clause "New" or "Revised" License' , at your option.
 *
 ********************************************************************************
@@ -11,7 +12,8 @@
 *
 ********************************************************************************
 *
-* License terms: STMicroelectronics Proprietary in accordance with licensing terms at www.st.com/sla0044
+* License terms: STMicroelectronics Proprietary in accordance with licensing
+* terms at www.st.com/sla0044
 *
 * STMicroelectronics confidential
 * Reproduction and Communication of this document is strictly prohibited unless
@@ -21,7 +23,8 @@
 ********************************************************************************
 *
 * Alternatively, VL53L1 Core may be distributed under the terms of
-* 'BSD 3-clause "New" or "Revised" License', in which case the following provisions apply instead of the ones
+* 'BSD 3-clause "New" or "Revised" License', in which case the following
+* provisions apply instead of the ones
 * mentioned above :
 *
 ********************************************************************************
@@ -92,6 +95,40 @@
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 #include "vl53l1_api_core.h"
 #include "vl53l1_api_strings.h"
 #include "vl53l1_error_codes.h"
@@ -102,8 +139,8 @@
 #define LOG_FUNCTION_END(status, ...) \
 	_LOG_FUNCTION_END(VL53L1_TRACE_MODULE_API, status, ##__VA_ARGS__)
 #define LOG_FUNCTION_END_FMT(status, fmt, ...) \
-	_LOG_FUNCTION_END_FMT(VL53L1_TRACE_MODULE_API, status, fmt, ##__VA_ARGS__)
-
+	_LOG_FUNCTION_END_FMT(VL53L1_TRACE_MODULE_API, status, fmt, \
+			##__VA_ARGS__)
 
 
 VL53L1_Error VL53L1_get_range_status_string(
@@ -215,6 +252,7 @@ VL53L1_Error VL53L1_get_sequence_steps_info(
 		char *pSequenceStepsString)
 {
 	VL53L1_Error Status = VL53L1_ERROR_NONE;
+
 	LOG_FUNCTION_START("");
 
 #ifdef VL53L1_USE_EMPTY_STRING
@@ -291,4 +329,5 @@ VL53L1_Error VL53L1_get_limit_check_info(uint16_t LimitCheckId,
 	LOG_FUNCTION_END(Status);
 	return Status;
 }
+
 

@@ -1,7 +1,7 @@
 /*
 * Copyright (c) 2016, STMicroelectronics - All Rights Reserved
 *
-* License terms: BSD 3-clause "New" or "Revised" License.
+*License terms : BSD 3-clause "New" or "Revised" License.
 *
 * Redistribution and use in source and binary forms, with or without
 * modification, are permitted provided that the following conditions are met:
@@ -45,87 +45,40 @@
 
 #include "vl53l1_def.h"
 /**
- * misc device  name
+ * @addtogroup vl53l1_ioctl
+ * @{
+ */
+
+/**
+ * misc device name for ioctl device
  *
  * for mutli instance all device 2nd and next instance are basic name +"1"+"2"
  * @li stmvl53l1_ranging
  * @li stmvl53l1_ranging1
  * @li stmvl53l1_ranging2
  */
-
 #define VL53L1_MISC_DEV_NAME		"laser"
-
-/**
- * @addtogroup vl53l1_ioctl
- * @{
- */
-
 /**
  * register data use for simple/single ranging data @ref VL53L1_IOCTL_GETDATAS
  *
  * @warning this definition is subject to change !
  */
-typedef VL53L1_RangingMeasurementData_t  stmvl531_range_data_t;
-
-/**
- * IOCTL register data structure use in @ref VL53L1_IOCTL_REGISTER
- *
- * for convenience an ease of use full data size capability is exposed here
- * but the @ref stmvl53l1_register_flexi can be used instead
- */
-struct stmvl53l1_register {
-	uint32_t is_read;	/*!< type of the access 1: read 0: write*/
-	uint32_t index;		/*!< register index */
-	uint32_t cnt;		/*!< register size shall be 1 to n */
-	int32_t status;		/*!< operation status 0 ok else error */
-
-	union reg_data_t {
-		uint8_t b;	/*!< single data byte*/
-		uint16_t w;	/*!< single data word (16 bits)*/
-		uint32_t dw;	/*!< single data dword (32 bits)*/
-		uint8_t bytes[256]; /*!< any size byte array
-		* @note only effectively used array size is needed and will be
-		* set/used another possible register definition is
-		* @ref stmvl53l1_register_flexi
-		*/
-	} data; /*!< data only *@warning device is big endian and
-	* no endianess adaptation is performed by @ref VL53L1_IOCTL_REGISTER
-	*/
-};
-
-/**
- * flexible size data length register access structure
- * for use in @ref VL53L1_IOCTL_REGISTER
- */
-struct stmvl53l1_register_flexi {
-	uint32_t is_read;	/*!< [in] type of the access 1: read 0: write*/
-	uint32_t index;		/*!< [in] register index */
-	uint32_t cnt;		/*!< [în] register size shall be 1 to n */
-	int32_t status;		/*!< [out] operation status 0 ok else error */
-	uint8_t data[];		/*!< [in/out] flexible array size data */
-	/*!< data only *@warning device is big endian and
-	* no endianess adaptation is performed by @ref VL53L1_IOCTL_REGISTER
-	*/
-};
-
+#define stmvl531_range_data_t VL53L1_RangingMeasurementData_t
 
 /**
  * parameter name in @ref stmvl53l1_parameter when using
  * @ref VL53L1_IOCTL_PARAMETER
  */
-typedef enum {
-	OFFSET_PAR = 0,
-	/*!< OFFSET_PAR  @warning NOT supported yet */
-	XTALKRATE_PAR = 1,
-	/*!< XTALKRATE_PAR @warning NOT supported yet */
-	XTALKENABLE_PAR = 2,
-	/*!< XTALKENABLE_PAR @warning NOT supported yet*/
-	GPIOFUNC_PAR = 3,
-	/*!< GPIOFUNC_PAR @warning NOT supported yet */
-	LOWTHRESH_PAR = 4,
-	/*!< LOWTHRESH_PAR @warning NOT supported yet */
-	HIGHTHRESH_PAR = 5,
-	/*!< HIGHTHRESH_PAR @warning NOT supported yet */
+enum __stmv53l1_parameter_name_e {
+	VL53L1_XTALKENABLE_PAR = 2,
+	/*!< VL53L1_XTALKENABLE_PAR enable/disable crosstalk compensation\n
+	 * valid value :
+	 * @li 0 disable crosstalk compensation
+	 * @li 1 enable crosstalk compensation
+	 *
+	 * @warning mode can only be set while not ranging
+	 */
+
 	VL53L1_DEVICEMODE_PAR = 6,
 	/*!< DEVICEMODE_PAR set ranging mode  \n
 	 * valid mode value :
@@ -136,14 +89,6 @@ typedef enum {
 	 *
 	 * @warning mode can only be set while not ranging
 	 */
-
-	VL53L1_INTERMEASUREMENT_PAR = 7,
-	/*!< INTERMEASUREMENT_PAR  NOT supported yet */
-
-	REFERENCESPADS_PAR = 8,
-	/*!< REFERENCESPADS_PAR @warning NOT supported yet */
-	REFCALIBRATION_PAR = 9,
-	/*!< REFCALIBRATION_PAR @warning NOT supported yet */
 
 	VL53L1_POLLDELAY_PAR = 10,
 	/*!< set the polling delay (msec)\n
@@ -156,12 +101,58 @@ typedef enum {
 	* @ref stmvl53l1_parameter.value field is timing budget in micro second
 	*
 	* @note the value cannot be set while ranging will set ebusy errno,
-	* value set is absorbed at next range start @ref VL53L1_IOCTL_INIT
+	* value set is absorbed at next range start @ref VL53L1_IOCTL_START
 	*/
 
+	VL53L1_DISTANCEMODE_PAR = 12,
+	/*!< VL53L1_DISTANCEMODE_PAR
+	 * valid distance mode value :
+	 * @li 1 @a VL53L1_DISTANCEMODE_SHORT
+	 * @li 2 @a VL53L1_DISTANCEMODE_MEDIUM
+	 * @li 3 @a VL53L1_DISTANCEMODE_LONG
+	 * @li 4 @a VL53L1_DISTANCEMODE_AUTO_LITE
+	 * @li 5 @a VL53L1_DISTANCEMODE_AUTO
+	 *
+	 * @warning distance mode can only be set while not ranging
+	 */
 
-} stmv53l1_parameter_name_e;
+	VL53L1_OUTPUTMODE_PAR = 13,
+	/*!< VL53L1_OUTPUTMODE_PAR
+	 * valid output mode value :
+	 * @li 1 @a VL53L1_OUTPUTMODE_NEAREST
+	 * @li 2 @a VL53L1_OUTPUTMODE_STRONGEST
+	 *
+	 * @warning distance mode can only be set while not ranging
+	 */
 
+	VL53L1_FORCEDEVICEONEN_PAR = 14,
+	/*!< VL53L1_FORCEDEVICEONEN_PAR
+	 * This parameter will control if device is put under reset when
+	 * stopped.
+	 * valid force device on value :
+	 * @li 0 feature is disable. Device is put under reset when stopped.
+	 * @li 1 feature is enable. Device is not put under reset when stopped.
+	 */
+
+	VL53L1_LASTERROR_PAR = 15,
+	/*!< VL53L1_LASTERROR_PAR
+	 * This is a read only parameter. It will return last device internal
+	 * error. It's valid only after an ioctl/sysfs return an -EIO error.
+	 */
+
+	VL53L1_CAMERAMODE_PAR = 16,
+	/*!< VL53L1_CAMERAMODE_PAR
+	* valid camera mode value :
+	* @li 0 device is out of camera mode.
+	* @li 1 device is in camera mode.
+	*/
+
+	VL53L1_HWREV_PAR = 17,
+	/*!< VL53L1_HWREV_PAR
+	* This is a read only parameter. It will return HW revision number
+	*/
+};
+#define stmv53l1_parameter_name_e enum __stmv53l1_parameter_name_e
 
 /**
  * parameter structure use in @ref VL53L1_IOCTL_PARAMETER
@@ -190,32 +181,109 @@ struct stmvl53l1_roi_t {
 	 * @li 0 to get roi
 	 * @li !0 to set roi
 	*/
+	/*! roi data and count type use in @ VL53L1_IOCTL_ROI */
 	struct roi_cfg_t {
 		uint8_t NumberOfRoi;
-		/*!< Number of Rois to set/get defined\n
-		 *  0 is set can be used to return to device default roi usage
-		 *  @warning 0 in get will not return any data in UserRois!
+		/*!< [in/out] Number of Rois to set/get
+		 *
+		 * on set :\n
+		 * [in] number of roi to set
+		 * @note 0 set can be used to return to device default roi usage
+		 *
+		 * on get :\n
+		 * [in] max number provided\n
+		 * [out] number of ROI  copied back to user\n
+		 * @warning 0 will not return any roi datas!
 		*/
 		VL53L1_UserRoi_t    UserRois[1];
 		/*!< roi data array length  definition is 1 but
 		 * NumberOfRoi+ FirstRoiToScan in array are required
 		 * and will be effectively copy to/from user space
+		 *
+		 * @sa stmvl53l1_roi_full_t
 		 */
-	} roi_cfg;
+	} roi_cfg /*!  [in/out] roi data and count */;
 };
 
 /**
  * full roi struct use in @ref VL53L1_IOCTL_ROI arg
  *
- * @sa stmvl53l1_roi_t for detail this one
- * make it easier to declare a fully static variable with the max roi storage
+ * this definition make easier variable declaration with the max roi storage
  * capabilities.
+ *
+ * @sa stmvl53l1_roi_t for  field details
  */
 struct stmvl53l1_roi_full_t {
 	int32_t		is_read;
+	/*!<  specify roi transfer direction \n
+	 * @li 0 to get roi
+	 * @li !0 to set roi
+	*/
 	VL53L1_RoiConfig_t roi_cfg;
+	/*!< roi data array of max length but only requested copy to/from user
+	 * space effectively used
+	 * see @a stmvl53l1_roi_t::roi_cfg for  details
+	 */
 };
 
+/**
+ * parameter structure use in @ref VL53L1_IOCTL_CALIBRATION_DATA
+ */
+struct stmvl53l1_ioctl_calibration_data_t {
+	int32_t is_read;	/*!< [in] 1: Get 0: Set*/
+	VL53L1_CalibrationData_t data;
+	/*!< [in/out] data to set /get. Caller
+	 * should consider this structure as an opaque one
+	 */
+};
+
+/** Select reference spad calibration in @ref VL53L1_IOCTL_PERFORM_CALIBRATION.
+ *
+ * param1, param2 and param3 not use
+ */
+#define VL53L1_CALIBRATION_REF_SPAD		0
+
+/** Select crosstalk calibration in @ref VL53L1_IOCTL_PERFORM_CALIBRATION.
+ *
+ * param1 is calibration method. param2 and param3 not use.
+ */
+#define VL53L1_CALIBRATION_CROSSTALK		1
+
+/** Select offset calibration  @ref VL53L1_IOCTL_PERFORM_CALIBRATION.
+ * param1 is target distance in mm. param2 and
+ * param3 not use.
+ */
+#define VL53L1_CALIBRATION_OFFSET		2
+
+/**
+ * parameter structure use in @ref VL53L1_IOCTL_PERFORM_CALIBRATION
+ */
+struct stmvl53l1_ioctl_perform_calibration_t {
+	uint32_t calibration_type;
+	/*!< [in] select which calibration to do :
+	 * @li @ref VL53L1_CALIBRATION_REF_SPAD
+	 * @li @ref VL53L1_CALIBRATION_CROSSTALK
+	 * @li @ref VL53L1_CALIBRATION_OFFSET
+	 */
+	uint32_t param1;
+	/*!< [in] first param. Usage depends on calibration_type */
+	uint32_t param2;
+	/*!< [in] second param. Usage depends on calibration_type */
+	uint32_t param3;
+	/*!< [in] third param. Usage depends on calibration_type */
+};
+
+/**
+ * parameter structure use in @ref VL53L1_IOCTL_AUTONOMOUS_CONFIG
+ */
+struct stmvl53l1_autonomous_config_t {
+	int32_t is_read;
+	/*!< [in] 1: Get 0: Set*/
+	uint32_t pollingTimeInMs;
+	/*!< [in/out] interval between two measure in ms */
+	VL53L1_DetectionConfig_t config;
+	/*!< [int/out] autonomous mode configuration structure */
+};
 
 /*
  * IOCTL definitions
@@ -238,7 +306,7 @@ struct stmvl53l1_roi_full_t {
  @code
  int smtvl53l1_start(int fd){error
 	int rc;
-	rc= ioctl(fd, VL53L1_IOCTL_INIT,NULL);
+	rc = ioctl(fd, VL53L1_IOCTL_START, NULL);
 	if( rc ){
 		if( errno == EBUSY){
 			//the device is already started
@@ -254,7 +322,13 @@ struct stmvl53l1_roi_full_t {
  @endcode
 */
 
-#define VL53L1_IOCTL_INIT			_IO('p', 0x01)
+#define VL53L1_IOCTL_START			_IO('p', 0x01)
+
+/* Alias for VL53L1_IOCTL_START. Still present for legacy support but usage is
+ * deprecated. Consider using VL53L1_IOCTL_START instead. May be removed without
+ * further notice.
+ */
+#define VL53L1_IOCTL_INIT			VL53L1_IOCTL_START
 
 /**
  * stop ranging (no argument)
@@ -283,14 +357,7 @@ int smtvl53l1_stop(int fd){
 }
 @endcode
  */
- #define VL53L1_IOCTL_STOP			_IO('p', 0x05)
-
-/**
- * set the offset calibration
- *  ioctl arg [IN] one byte offset
- *  @param offset type int8_t is the offset in ??  to be set
- */
-#define VL53L1_IOCTL_SETOFFSET		_IOW('p', 0x07, int8_t)
+#define VL53L1_IOCTL_STOP			_IO('p', 0x05)
 
 /**
  * get single ranging data @sa for multi zone/objet
@@ -300,7 +367,8 @@ int smtvl53l1_stop(int fd){
  * @param in/out data struct ptr of type @ref stmvl531_range_data_t
  * it may come in but is out as of now
  *
- * this function succeed whatever device state (off, stopped )
+ * @return 0 on success else o, error check errno
+ * @li -EFAULT fault in cpy to f/m user out range data not copied
  *
  * @warning this ioctl will not wait for a new range sample acquisition
  * it will return what available at time it get called . Hence same data maybe
@@ -311,15 +379,6 @@ int smtvl53l1_stop(int fd){
  */
 #define VL53L1_IOCTL_GETDATAS \
 			_IOWR('p', 0x0b, stmvl531_range_data_t)
-
-/**
- * low level register access IOCTL
- * ioctl arg [IN]/[OUT] pointer to register struct @ref stmvl53l1_register
- * or @ref stmvl53l1_register_flexi
- *
- * ioctl arg [out] set back with status and data when applicable
- */
-#define VL53L1_IOCTL_REGISTER	_IOWR('p', 0x0c, struct stmvl53l1_register)
 
 /**
  * set or get parameter
@@ -383,5 +442,123 @@ int smtvl53l1_stop(int fd){
  */
 #define VL53L1_IOCTL_MZ_DATA\
 			_IOR('p', 0x0f, VL53L1_MultiRangingData_t)
+
+/**
+ * get single ranging data @sa for multi zone/objet
+ *
+ * this call is equivalent to VL53L1_IOCTL_GETDATAS but will block until
+ * new data are available since previous call.
+ *
+ * @param in/out data struct ptr of type @ref stmvl531_range_data_t
+ * it may come in but is out as of now
+ *
+ * @return 0 on success else o, error check errno
+ * @li -EFAULT fault in cpy to f/m user out range data not copied
+ * @li -ENODEV device is not ranging.
+ * @li -ERESTARTSYS interrupt while sleeping.
+ */
+#define VL53L1_IOCTL_GETDATAS_BLOCKING\
+			_IOWR('p', 0x10, stmvl531_range_data_t)
+
+/**
+ * Get multi object/zone ranging data
+ *
+ * this call is equivalent to VL53L1_IOCTL_MZ_DATA but will block until
+ * new data are available since previous call.
+ *
+ * @param [out] multi zone range @ref VL53L1_MultiRangingData_t always update
+ * but -EFAULT error case
+ *
+ * @return 0 on success else o, error check errno
+ * @li -EFAULT fault in cpy to f/m user out range data not copyed
+ * @li -ENOEXEC active mode is not mutli-zone
+ * @li -ENODEV device is not ranging.
+ * @li -ERESTARTSYS interrupt while sleeping.
+ * as in that case MZ data may not be fully valid
+ */
+#define VL53L1_IOCTL_MZ_DATA_BLOCKING\
+			_IOR('p', 0x11, VL53L1_MultiRangingData_t)
+
+/**
+ * Get / set calibration data
+ *
+ * this call allow client to either read calibration data after calibration
+ * has been performed to store them in the host filesystem or push calibration
+ * data before ranging at each start-up.
+ *
+ * @param [in/out] data struct ptr of type
+ * @ref stmvl53l1_ioctl_calibration_data_t. Caller should consider it as an
+ * opaque structure.
+ *
+ * @return 0 on success else o, error check errno
+ * @li -EFAULT fault in cpy to f/m user out range data not copied
+ * @li -EBUSY when trying to set calibration data while ranging
+ */
+#define VL53L1_IOCTL_CALIBRATION_DATA\
+	_IOWR('p', 0x12, struct stmvl53l1_ioctl_calibration_data_t)
+
+/**
+ * perform calibration squence according to calibration_type
+ *
+ * this call is attended to be used during factory calibration. You select
+ * calibration to issue using calibration_type.
+ *
+ * @param [in] data struct ptr of type
+ * @ref stmvl53l1_ioctl_perform_calibration_t.
+ *
+ * @return 0 on success else o, error check errno
+ * @li -EFAULT fault in cpy to f/m user out range data not copied
+ * @li -EBUSY when trying to perform calibration data while ranging
+ */
+#define VL53L1_IOCTL_PERFORM_CALIBRATION\
+	_IOW('p', 0x13, struct stmvl53l1_ioctl_perform_calibration_t)
+
+/**
+ * set/get configure autonomous mode parameters
+ *
+ * Allow to get or set autonomous configuration. Change it only when device
+ * is stopped otherwise you will receive an EBUSY error.
+ *
+ * @param stmvl53l1_autonomous_config_t [in/out]
+ *
+ * @note autonomous config validity is only checked at start ranging , as such
+ * invalid autonomous config set can make start to fail.
+ *
+ * @return 0 on success , see errno for error detail
+ * @li -EFAULT failed to copy from/to configuration.
+ * @li -EBUSY when trying to change configuration while ranging.
+ */
+#define VL53L1_IOCTL_AUTONOMOUS_CONFIG\
+	_IOWR('p', 0x14, struct stmvl53l1_autonomous_config_t)
+
+/**
+ * suspend ranging (no argument)
+
+ * @note  sysfs and ioctl control are assumed mutual exclusive use
+ * control from ioctl execute action with no consideration of sysfs path.
+ *
+ * @return
+ * @li 0 on success
+ * @li -EBUSY if it was already
+ * @li other specific error code shall be >0
+ *
+ * c example userland :
+ @code
+int smtvl53l1_stop(int fd){
+	int rc;
+	rc= ioctl(fd, VL53L1_IOCTL_SUSPEND,NULL);
+	if( rc ){
+		if( errno == EBUSY ){
+			ioctl_warn("already suspended");
+			return errno;
+		}
+		ioctl_error("%d %s", rc,strerror(errno));
+	}
+	return rc;
+}
+@endcode
+ */
+#define VL53L1_IOCTL_SUSPEND		   _IO('p', 0x15)
+
 /** @} */ /* ioctl group */
 #endif /* STMVL53L1_IF_H */

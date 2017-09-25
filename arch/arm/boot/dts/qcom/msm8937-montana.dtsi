@@ -32,6 +32,7 @@
 		gpio = <&tlmm 59 0>;
 		startup-delay-us = <300>;
 		enable-active-high;
+		regulator-always-on;
 	};
 
 	dummy_vreg: dummy_vreg {
@@ -149,6 +150,38 @@
 		pinctrl-names = "default";
 		pinctrl-0 = <&cs35l35_irq_default &cs35l35_reset_default>;
 	};
+
+	liteon@23 {
+		compatible = "liteon,ltr559";
+		reg = <0x23>;
+		pinctrl-names = "default","sleep";
+		pinctrl-0 = <&ltr559_default>;
+		pinctrl-1 = <&ltr559_sleep>;
+		interrupt-parent = <&tlmm>;
+		interrupts = <46 0x2>;
+		vdd-supply = <&pm8937_l10>;
+		vio-supply = <&pm8937_l6>;
+		ltr,irq-gpio = <&tlmm 46 0x2>;
+		ltr,ps-faroffset = <30>;
+		ltr,ps-nearoffset = <40>;
+		ltr,ps-threshold = <800>;
+		ltr,ps-hysteresis-threshold = <300>;
+		ltr,als-polling-time = <200>;
+		ltr,prox-sensor-name = "Rear Proximity sensor";
+	};
+};
+
+&pm8937_gpios {
+	gpio@c400 {
+		qcom,mode = <0>;
+		qcom,output-type = <0>;
+		qcom,pull = <0>;
+		qcom,vin-sel = <2>;
+		qcom,out-strength = <3>;
+		qcom,src-sel = <0>;
+		qcom,master-en = <1>;
+		status = "okay";
+	};
 };
 
 &i2c_5 { /* BLSP2 QUP1 (NFC) */
@@ -177,7 +210,14 @@
 &i2c_3 {
 	synaptics_dsx_i2c@20 {
 		touch_vdd-supply = <&vdda_touch_vreg>;
+		regulator-power-off-no-delay;
+		pinctrl-0 = <&touch_reset_active &touch_int_default>;
 	};
+};
+
+&pm8937_l10 {
+	regulator-always-on;
+	regulator-boot-on;
 };
 
 &pmx_mdss {
@@ -297,7 +337,7 @@
 		};
 
 		config {
-			pin = "gpio38";
+			pins = "gpio38";
 			output-high;
 			bias-pull-up;
 			drive-strength = <2>;
@@ -345,12 +385,28 @@
 			};
 		};
 	};
+
+	sdhc2_cd_pin {
+                sdc2_cd_on: cd_on {
+				mux {
+                                        pins = "gpio67";
+                                        function = "gpio";
+                                };
+
+                                config {
+                                        pins = "gpio67";
+                                        drive-strength = <2>;
+                        		/delete-property/ bias-pull-up;
+                        		bias-disable;
+                                };
+                };
+        };
 };
 
 &pmi8950_charger {
 	qcom,fastchg-current-ma = <3000>;
 	qcom,chg-thermal-mitigation = <3000>, <2500>, <2000>, <1600>,
-		<1000>, <500>, <400>;
+		<1000>, <500>, <300>;
 	/delete-property/ qcom,dc-thermal-mitigation;
 	qcom,parallel-charge-current-map = <3000 3000 0>,
 					   <2500 2500 0>,
@@ -359,10 +415,17 @@
 					   <1000 1000 0>,
 					   <500 500 0>,
 					   <400 400 0>;
-	qcom,stepchg-voltage-mv = <4400>;
-	qcom,stepchg-current-ma = <3000>;
+	qcom,stepchg-voltage-mv = <4200>;
+	qcom,stepchg-current-ma = <2000>;
 	qcom,stepchg-taper-ma = <1800>;
 	qcom,stepchg-iterm-ma = <125>;
+	qcom,temp-warm-current-ma = <1500>;
+	qcom,temp-cool-current-ma = <600>;
+	qcom,temp-slightly-cool-current-ma = <600>;
+	qcom,slightly-cool-temp-c = <15>;
+	qcom,enable-charging-limit;
+	qcom,upper-limit-capacity = <80>;
+	qcom,lower-limit-capacity = <60>;
 };
 
 &pmi8950_fg {
@@ -373,9 +436,12 @@
 &mot_batterydata {
 	df-serialnum = "SB18C15119";
 	#include "batterydata-hg30-atl.dtsi"
+	#include "batterydata-hg30-swd.dtsi"
 };
 
 &usb_otg {
+	qcom,hsusb-otg-phy-init-seq =
+		<0x33 0x80 0x38 0x81 0x2f 0x82 0x13 0x83 0xffffffff>;
 	qcom,chg-dcp-icl = <1800>;
 };
 
@@ -396,3 +462,8 @@
 &sdhc_2 {
 	cd-gpios = <&tlmm 67 0x0>;
 };
+
+&pmi_haptic {
+	qcom,vmax-mv = <2552>;
+};
+

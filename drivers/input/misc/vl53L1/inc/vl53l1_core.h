@@ -2,7 +2,8 @@
 /*
 * Copyright (c) 2016, STMicroelectronics - All Rights Reserved
 *
-* This file is part of VL53L1 Core and is dual licensed, either 'STMicroelectronics Proprietary license'
+* This file is part of VL53L1 Core and is dual licensed, either 'STMicroelectronics
+* Proprietary license'
 * or 'BSD 3-clause "New" or "Revised" License' , at your option.
 *
 ********************************************************************************
@@ -11,7 +12,8 @@
 *
 ********************************************************************************
 *
-* License terms: STMicroelectronics Proprietary in accordance with licensing terms at www.st.com/sla0044
+* License terms: STMicroelectronics Proprietary in accordance with licensing
+* terms at www.st.com/sla0044
 *
 * STMicroelectronics confidential
 * Reproduction and Communication of this document is strictly prohibited unless
@@ -21,7 +23,8 @@
 ********************************************************************************
 *
 * Alternatively, VL53L1 Core may be distributed under the terms of
-* 'BSD 3-clause "New" or "Revised" License', in which case the following provisions apply instead of the ones
+* 'BSD 3-clause "New" or "Revised" License', in which case the following
+* provisions apply instead of the ones
 * mentioned above :
 *
 ********************************************************************************
@@ -97,6 +100,7 @@
 #define _VL53L1_CORE_H_
 
 #include "vl53l1_platform.h"
+#include "vl53l1_core_support.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -110,7 +114,7 @@ extern "C" {
 
 
 
-void VL53L1_FCTN_00033(
+void VL53L1_init_version(
 	VL53L1_DEV         Dev);
 
 
@@ -122,9 +126,9 @@ void VL53L1_FCTN_00033(
 
 
 
-void VL53L1_FCTN_00038(
+void VL53L1_init_ll_driver_state(
 	VL53L1_DEV         Dev,
-	VL53L1_DeviceState VL53L1_PRM_00069);
+	VL53L1_DeviceState ll_state);
 
 
 
@@ -137,7 +141,7 @@ void VL53L1_FCTN_00038(
 
 
 
-VL53L1_Error VL53L1_FCTN_00091(
+VL53L1_Error VL53L1_update_ll_driver_rd_state(
 	VL53L1_DEV         Dev);
 
 
@@ -152,7 +156,7 @@ VL53L1_Error VL53L1_FCTN_00091(
 
 
 
-VL53L1_Error VL53L1_FCTN_00104(
+VL53L1_Error VL53L1_check_ll_driver_rd_state(
 	VL53L1_DEV         Dev);
 
 
@@ -166,7 +170,7 @@ VL53L1_Error VL53L1_FCTN_00104(
 
 
 
-VL53L1_Error VL53L1_FCTN_00092(
+VL53L1_Error VL53L1_update_ll_driver_cfg_state(
 	VL53L1_DEV         Dev);
 
 
@@ -178,9 +182,22 @@ VL53L1_Error VL53L1_FCTN_00092(
 
 
 
+void VL53L1_copy_rtn_good_spads_to_buffer(
+	VL53L1_nvm_copy_data_t  *pdata,
+	uint8_t                 *pbuffer);
 
 
-void VL53L1_FCTN_00115(
+
+
+
+
+
+
+
+
+
+
+void VL53L1_init_system_results(
 	VL53L1_system_results_t      *pdata);
 
 
@@ -192,8 +209,8 @@ void VL53L1_FCTN_00115(
 
 
 
-void VL53L1_FCTN_00079(
-	uint8_t                 VL53L1_PRM_00020,
+void V53L1_init_zone_results_structure(
+	uint8_t                 active_zones,
 	VL53L1_zone_results_t  *pdata);
 
 
@@ -242,7 +259,7 @@ void VL53L1_FCTN_00079(
 
 
 
-void VL53L1_FCTN_00113(
+void VL53L1_init_histogram_config_structure(
 	uint8_t   even_bin0,
 	uint8_t   even_bin1,
 	uint8_t   even_bin2,
@@ -267,39 +284,6 @@ void VL53L1_FCTN_00113(
 
 
 
-void VL53L1_FCTN_00022(
-	int32_t                      bin_value,
-	uint16_t                     VL53L1_PRM_00139,
-	VL53L1_histogram_bin_data_t *pdata);
-
-
-
-
-
-
-
-
-
-
-
-void VL53L1_FCTN_00042(
-	uint32_t                       bin_value,
-	uint16_t                       VL53L1_PRM_00139,
-	VL53L1_xtalk_histogram_data_t *pdata);
-
-
-
-
-
-
-
-
-
-
-
-void VL53L1_FCTN_00116(
-		VL53L1_xtalk_histogram_data_t *pxtalk,
-		VL53L1_histogram_bin_data_t   *phist);
 
 
 
@@ -313,7 +297,79 @@ void VL53L1_FCTN_00116(
 
 
 
-void VL53L1_FCTN_00117(
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+void VL53L1_init_histogram_multizone_config_structure(
+	uint8_t   even_bin0,
+	uint8_t   even_bin1,
+	uint8_t   even_bin2,
+	uint8_t   even_bin3,
+	uint8_t   even_bin4,
+	uint8_t   even_bin5,
+	uint8_t   odd_bin0,
+	uint8_t   odd_bin1,
+	uint8_t   odd_bin2,
+	uint8_t   odd_bin3,
+	uint8_t   odd_bin4,
+	uint8_t   odd_bin5,
+	VL53L1_histogram_config_t  *pdata);
+
+
+
+
+
+
+
+
+
+
+
+void VL53L1_init_xtalk_bin_data_struct(
+	uint32_t                        bin_value,
+	uint16_t                        VL53L1_PRM_00017,
+	VL53L1_xtalk_histogram_shape_t *pdata);
+
+
+
+
+
+
+
+
+
+
+
+
+
+void VL53L1_i2c_encode_uint16_t(
 	uint16_t    ip_value,
 	uint16_t    count,
 	uint8_t    *pbuffer);
@@ -331,7 +387,7 @@ void VL53L1_FCTN_00117(
 
 
 
-uint16_t VL53L1_FCTN_00105(
+uint16_t VL53L1_i2c_decode_uint16_t(
 	uint16_t    count,
 	uint8_t    *pbuffer);
 
@@ -347,7 +403,7 @@ uint16_t VL53L1_FCTN_00105(
 
 
 
-void VL53L1_FCTN_00118(
+void VL53L1_i2c_encode_int16_t(
 	int16_t     ip_value,
 	uint16_t    count,
 	uint8_t    *pbuffer);
@@ -365,7 +421,7 @@ void VL53L1_FCTN_00118(
 
 
 
-int16_t VL53L1_FCTN_00119(
+int16_t VL53L1_i2c_decode_int16_t(
 	uint16_t    count,
 	uint8_t    *pbuffer);
 
@@ -381,7 +437,7 @@ int16_t VL53L1_FCTN_00119(
 
 
 
-void VL53L1_FCTN_00120(
+void VL53L1_i2c_encode_uint32_t(
 	uint32_t    ip_value,
 	uint16_t    count,
 	uint8_t    *pbuffer);
@@ -399,7 +455,7 @@ void VL53L1_FCTN_00120(
 
 
 
-uint32_t VL53L1_FCTN_00106(
+uint32_t VL53L1_i2c_decode_uint32_t(
 	uint16_t    count,
 	uint8_t    *pbuffer);
 
@@ -419,7 +475,7 @@ uint32_t VL53L1_FCTN_00106(
 
 
 
-uint32_t VL53L1_FCTN_00121(
+uint32_t VL53L1_i2c_decode_with_mask(
 	uint16_t    count,
 	uint8_t    *pbuffer,
 	uint32_t    bit_mask,
@@ -438,7 +494,7 @@ uint32_t VL53L1_FCTN_00121(
 
 
 
-void VL53L1_FCTN_00122(
+void VL53L1_i2c_encode_int32_t(
 	int32_t     ip_value,
 	uint16_t    count,
 	uint8_t    *pbuffer);
@@ -456,7 +512,7 @@ void VL53L1_FCTN_00122(
 
 
 
-int32_t VL53L1_FCTN_00123(
+int32_t VL53L1_i2c_decode_int32_t(
 	uint16_t    count,
 	uint8_t    *pbuffer);
 
@@ -472,9 +528,9 @@ int32_t VL53L1_FCTN_00123(
 
 
 
-VL53L1_Error VL53L1_FCTN_00029(
+VL53L1_Error VL53L1_start_test(
 	VL53L1_DEV     Dev,
-	uint8_t        VL53L1_PRM_00206);
+	uint8_t        test_mode__ctrl);
 
 
 
@@ -491,7 +547,7 @@ VL53L1_Error VL53L1_FCTN_00029(
 
 
 
-VL53L1_Error VL53L1_FCTN_00124(
+VL53L1_Error VL53L1_set_firmware_enable_register(
 	VL53L1_DEV         Dev,
 	uint8_t            value);
 
@@ -506,7 +562,7 @@ VL53L1_Error VL53L1_FCTN_00124(
 
 
 
-VL53L1_Error VL53L1_FCTN_00037(
+VL53L1_Error VL53L1_enable_firmware(
 	VL53L1_DEV         Dev);
 
 
@@ -522,7 +578,7 @@ VL53L1_Error VL53L1_FCTN_00037(
 
 
 
-VL53L1_Error VL53L1_FCTN_00036(
+VL53L1_Error VL53L1_disable_firmware(
 	VL53L1_DEV         Dev);
 
 
@@ -540,7 +596,7 @@ VL53L1_Error VL53L1_FCTN_00036(
 
 
 
-VL53L1_Error VL53L1_FCTN_00125(
+VL53L1_Error VL53L1_set_powerforce_register(
 	VL53L1_DEV         Dev,
 	uint8_t            value);
 
@@ -561,7 +617,7 @@ VL53L1_Error VL53L1_FCTN_00125(
 
 
 
-VL53L1_Error VL53L1_FCTN_00019(
+VL53L1_Error VL53L1_enable_powerforce(
 	VL53L1_DEV         Dev);
 
 
@@ -578,7 +634,7 @@ VL53L1_Error VL53L1_FCTN_00019(
 
 
 
-VL53L1_Error VL53L1_FCTN_00126(
+VL53L1_Error VL53L1_disable_powerforce(
 	VL53L1_DEV         Dev);
 
 
@@ -593,7 +649,7 @@ VL53L1_Error VL53L1_FCTN_00126(
 
 
 
-VL53L1_Error VL53L1_FCTN_00031(
+VL53L1_Error VL53L1_clear_interrupt(
 	VL53L1_DEV         Dev);
 
 
@@ -608,7 +664,7 @@ VL53L1_Error VL53L1_FCTN_00031(
 
 
 
-VL53L1_Error VL53L1_FCTN_00127(
+VL53L1_Error VL53L1_force_shadow_stream_count_to_zero(
 	VL53L1_DEV         Dev);
 
 
@@ -629,22 +685,9 @@ VL53L1_Error VL53L1_FCTN_00127(
 
 
 
-uint32_t VL53L1_FCTN_00028(
-	uint16_t VL53L1_PRM_00098,
-	uint8_t  VL53L1_PRM_00041);
-
-
-
-
-
-
-
-
-
-
-
-uint32_t VL53L1_FCTN_00109(
-	uint16_t VL53L1_PRM_00098);
+uint32_t VL53L1_calc_macro_period_us(
+	uint16_t fast_osc_frequency,
+	uint8_t  VL53L1_PRM_00007);
 
 
 
@@ -659,8 +702,15 @@ uint32_t VL53L1_FCTN_00109(
 
 
 
-uint32_t VL53L1_FCTN_00129(
-	uint16_t VL53L1_PRM_00098);
+
+
+
+
+uint16_t VL53L1_calc_range_ignore_threshold(
+	uint16_t central_rate,
+	int16_t  x_gradient,
+	int16_t  y_gradient,
+	uint8_t  rate_mult);
 
 
 
@@ -674,9 +724,9 @@ uint32_t VL53L1_FCTN_00129(
 
 
 
-uint16_t VL53L1_FCTN_00130(
-	uint32_t  VL53L1_PRM_00042,
-    uint32_t  macro_period_ns);
+uint32_t VL53L1_calc_timeout_mclks(
+	uint32_t  timeout_us,
+	uint32_t  macro_period_us);
 
 
 
@@ -688,7 +738,53 @@ uint16_t VL53L1_FCTN_00130(
 
 
 
-uint16_t VL53L1_FCTN_00131(
+
+uint16_t VL53L1_calc_encoded_timeout(
+	uint32_t  timeout_us,
+	uint32_t  macro_period_us);
+
+
+
+
+
+
+
+
+
+
+
+
+
+uint32_t VL53L1_calc_timeout_us(
+	uint32_t  timeout_mclks,
+	uint32_t  macro_period_us);
+
+
+
+
+
+
+
+
+
+
+
+
+uint32_t VL53L1_calc_decoded_timeout_us(
+	uint16_t  timeout_encoded,
+	uint32_t  macro_period_us);
+
+
+
+
+
+
+
+
+
+
+
+uint16_t VL53L1_encode_timeout(
 	uint32_t timeout_mclks);
 
 
@@ -702,7 +798,7 @@ uint16_t VL53L1_FCTN_00131(
 
 
 
-uint32_t VL53L1_FCTN_00108(
+uint32_t VL53L1_decode_timeout(
 	uint16_t encoded_timeout);
 
 
@@ -722,11 +818,15 @@ uint32_t VL53L1_FCTN_00108(
 
 
 
-VL53L1_Error  VL53L1_FCTN_00005(
-	uint32_t                VL53L1_PRM_00006,
-	uint32_t                VL53L1_PRM_00007,
-	uint16_t                VL53L1_PRM_00098,
-	VL53L1_timing_config_t *ptiming);
+
+
+VL53L1_Error  VL53L1_calc_timeout_register_values(
+	uint32_t                 phasecal_config_timeout_us,
+	uint32_t                 mm_config_timeout_us,
+	uint32_t                 range_config_timeout_us,
+	uint16_t                 fast_osc_frequency,
+	VL53L1_general_config_t *pgeneral,
+	VL53L1_timing_config_t  *ptiming);
 
 
 
@@ -739,22 +839,9 @@ VL53L1_Error  VL53L1_FCTN_00005(
 
 
 
-uint8_t VL53L1_FCTN_00132(
-	uint8_t VL53L1_PRM_00311);
+uint8_t VL53L1_encode_vcsel_period(
+	uint8_t VL53L1_PRM_00028);
 
-
-
-
-
-
-
-
-
-
-
-
-uint8_t VL53L1_FCTN_00128(
-	uint8_t vcsel_period_reg);
 
 
 
@@ -769,7 +856,7 @@ uint8_t VL53L1_FCTN_00128(
 
 
 
-uint32_t VL53L1_FCTN_00133(
+uint32_t VL53L1_decode_unsigned_integer(
 	uint8_t  *pbuffer,
 	uint8_t   no_of_bytes);
 
@@ -784,7 +871,7 @@ uint32_t VL53L1_FCTN_00133(
 
 
 
-void   VL53L1_FCTN_00134(
+void   VL53L1_encode_unsigned_integer(
 	uint32_t  ip_value,
 	uint8_t   no_of_bytes,
 	uint8_t  *pbuffer);
@@ -804,182 +891,9 @@ void   VL53L1_FCTN_00134(
 
 
 
-uint32_t VL53L1_FCTN_00110(
-	uint32_t  VL53L1_PRM_00131,
-	uint32_t  vcsel_parm_pclks,
-	uint32_t  window_vclks,
-	uint32_t  periods_elapsed_mclks);
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-uint16_t VL53L1_FCTN_00135(
-	int32_t   VL53L1_PRM_00199,
-	uint32_t  time_us);
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-int32_t VL53L1_FCTN_00136(
-	uint16_t  VL53L1_PRM_00098,
-	uint16_t  VL53L1_PRM_00094,
-	uint16_t  VL53L1_PRM_00306,
-	int32_t   VL53L1_PRM_00202);
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-uint16_t VL53L1_FCTN_00137(
-	uint32_t  frac_bits,
-	uint32_t  peak_count_rate,
-	uint16_t  num_spads,
-	uint32_t  max_output_value);
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-uint32_t VL53L1_FCTN_00138(
-	int32_t   VL53L1_PRM_00072,
-	uint16_t  num_spads,
-	uint32_t  duration);
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-void VL53L1_FCTN_00139(
-	VL53L1_histogram_bin_data_t   *pdata);
-
-
-
-
-
-
-
-
-
-
-
-
-
-void VL53L1_FCTN_00140(
-	VL53L1_histogram_bin_data_t    *pdata);
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-void VL53L1_FCTN_00112(
-	VL53L1_histogram_bin_data_t    *pdata);
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-void VL53L1_FCTN_00141(
-	int32_t                      ambient_threshold_sigma,
-	VL53L1_histogram_bin_data_t *pdata);
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-void VL53L1_FCTN_00100(
-	VL53L1_histogram_bin_data_t    *pidata,
+VL53L1_Error VL53L1_hist_copy_and_scale_ambient_info(
+	VL53L1_zone_hist_info_t        *pidata,
 	VL53L1_histogram_bin_data_t    *podata);
 
 
@@ -991,21 +905,9 @@ void VL53L1_FCTN_00100(
 
 
 
-void VL53L1_FCTN_00111(
-	VL53L1_histogram_bin_data_t    *pdata);
 
 
-
-
-
-
-
-
-
-
-
-
-void  VL53L1_FCTN_00107(
+void  VL53L1_hist_get_bin_sequence_config(
 	VL53L1_DEV                     Dev,
 	VL53L1_histogram_bin_data_t   *pdata);
 
@@ -1029,26 +931,12 @@ void  VL53L1_FCTN_00107(
 
 
 
-VL53L1_Error  VL53L1_FCTN_00101(
-	VL53L1_DEV                Dev,
-	VL53L1_range_results_t   *previous,
-	VL53L1_range_results_t   *pcurrent);
-
-
-
-
-
-
-
-
-
-
-
-
-void VL53L1_FCTN_00052(
-	uint8_t   spad_number,
-	uint8_t  *prow,
-	uint8_t  *pcol);
+VL53L1_Error  VL53L1_hist_phase_consistency_check(
+	VL53L1_DEV                   Dev,
+	VL53L1_zone_hist_info_t     *phist_prev,
+	VL53L1_histogram_bin_data_t *phist_curr,
+	VL53L1_zone_objects_t       *prange_prev,
+	VL53L1_range_results_t      *prange_curr);
 
 
 
@@ -1062,7 +950,123 @@ void VL53L1_FCTN_00052(
 
 
 
-void VL53L1_FCTN_00050(
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+VL53L1_Error  VL53L1_hist_events_consistency_check(
+	VL53L1_DEV                   Dev,
+	uint8_t                      VL53L1_PRM_00001,
+	uint8_t                      p,
+	VL53L1_zone_hist_info_t     *phist_prev,
+	VL53L1_histogram_bin_data_t *phist_curr,
+	VL53L1_zone_objects_t       *prange_prev,
+	VL53L1_range_results_t      *prange_curr,
+	int32_t                     *pevents_tolerance,
+	int32_t                     *pevents_delta,
+	VL53L1_DeviceError          *prange_status);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+VL53L1_Error  VL53L1_hist_wrap_dmax(
+	VL53L1_hist_post_process_config_t *phistpostprocess,
+	VL53L1_histogram_bin_data_t       *pcurrent,
+	int16_t                           *pwrap_dmax_mm);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+void VL53L1_hist_combine_mm1_mm2_offsets(
+	int16_t                              mm1_offset_mm,
+	int16_t                              mm2_offset_mm,
+	uint8_t                              encoded_mm_roi_centre,
+	uint8_t                              encoded_mm_roi_size,
+	uint8_t                              encoded_zone_centre,
+	uint8_t                              encoded_zone_size,
+	VL53L1_additional_offset_cal_data_t *pcal_data,
+	uint8_t                             *pgood_spads,
+	uint16_t                             aperture_attenuation,
+	int16_t                             *prange_offset_mm);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+void VL53L1_spad_number_to_byte_bit_index(
+	uint8_t  spad_number,
+	uint8_t *pbyte_index,
+	uint8_t *pbit_index,
+	uint8_t *pbit_mask);
+
+
+
+
+
+
+
+
+
+
+
+
+
+void VL53L1_encode_row_col(
 	uint8_t  row,
 	uint8_t  col,
 	uint8_t *pspad_number);
@@ -1078,9 +1082,108 @@ void VL53L1_FCTN_00050(
 
 
 
+void VL53L1_decode_zone_size(
+	uint8_t   encoded_xy_size,
+	uint8_t  *pwidth,
+	uint8_t  *pheight);
 
 
-void VL53L1_FCTN_00102(
+
+
+
+
+
+
+
+
+
+
+void VL53L1_encode_zone_size(
+	uint8_t  width,
+	uint8_t  height,
+	uint8_t *pencoded_xy_size);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+void VL53L1_decode_zone_limits(
+	uint8_t   encoded_xy_centre,
+	uint8_t   encoded_xy_size,
+	int16_t  *px_ll,
+	int16_t  *py_ll,
+	int16_t  *px_ur,
+	int16_t  *py_ur);
+
+
+
+
+
+
+
+
+
+
+
+
+uint8_t VL53L1_is_aperture_location(
+	uint8_t   row,
+	uint8_t   col);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+void VL53L1_calc_mm_effective_spads(
+	uint8_t     encoded_mm_roi_centre,
+	uint8_t     encoded_mm_roi_size,
+	uint8_t     encoded_zone_centre,
+	uint8_t     encoded_zone_size,
+	uint8_t    *pgood_spads,
+	uint16_t    aperture_attenuation,
+	uint16_t   *pmm_inner_effective_spads,
+	uint16_t   *pmm_outer_effective_spads);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+void VL53L1_hist_copy_results_to_sys_and_core(
 	VL53L1_histogram_bin_data_t      *pbins,
 	VL53L1_range_results_t           *phist,
 	VL53L1_system_results_t          *psys,
@@ -1099,7 +1202,7 @@ void VL53L1_FCTN_00102(
 
 
 
-VL53L1_Error VL53L1_FCTN_00024 (
+VL53L1_Error VL53L1_sum_histogram_data (
 		VL53L1_histogram_bin_data_t *phist_input,
 		VL53L1_histogram_bin_data_t *phist_output);
 
@@ -1117,8 +1220,8 @@ VL53L1_Error VL53L1_FCTN_00024 (
 
 
 
-VL53L1_Error VL53L1_FCTN_00026 (
-		uint8_t VL53L1_PRM_00064,
+VL53L1_Error VL53L1_avg_histogram_data (
+		uint8_t no_of_samples,
 		VL53L1_histogram_bin_data_t *phist_sum,
 		VL53L1_histogram_bin_data_t *phist_avg);
 
@@ -1134,21 +1237,7 @@ VL53L1_Error VL53L1_FCTN_00026 (
 
 
 
-uint32_t VL53L1_FCTN_00142(
-	uint32_t  num);
-
-
-
-
-
-
-
-
-
-
-
-
-VL53L1_Error VL53L1_FCTN_00083(
+VL53L1_Error VL53L1_save_cfg_data(
 	VL53L1_DEV  Dev);
 
 
@@ -1164,9 +1253,255 @@ VL53L1_Error VL53L1_FCTN_00083(
 
 
 
-VL53L1_Error VL53L1_FCTN_00103(
+VL53L1_Error VL53L1_dynamic_zone_update(
 	VL53L1_DEV  Dev,
 	VL53L1_range_results_t *presults);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+VL53L1_Error VL53L1_update_internal_stream_counters(
+	  VL53L1_DEV  Dev,
+	uint8_t     external_stream_count,
+	uint8_t     *pinternal_stream_count,
+	uint8_t     *pinternal_stream_count_val
+	);
+
+
+
+
+
+
+
+
+
+
+
+
+VL53L1_Error VL53L1_multizone_hist_bins_update(
+	VL53L1_DEV  Dev);
+
+
+
+
+
+
+
+VL53L1_Error VL53L1_set_histogram_multizone_initial_bin_config(
+	  VL53L1_zone_config_t           *pzone_cfg,
+	  VL53L1_histogram_config_t      *phist_cfg,
+	  VL53L1_histogram_config_t      *pmulti_hist
+    );
+
+
+
+
+
+
+
+
+
+uint8_t	VL53L1_encode_GPIO_interrupt_config(
+	VL53L1_GPIO_interrupt_config_t	*pintconf);
+
+
+
+
+
+
+
+
+
+VL53L1_GPIO_interrupt_config_t VL53L1_decode_GPIO_interrupt_config(
+	uint8_t		system__interrupt_config);
+
+
+
+
+
+
+
+
+
+
+VL53L1_Error VL53L1_set_GPIO_distance_threshold(
+	VL53L1_DEV                      Dev,
+	uint16_t			threshold_high,
+	uint16_t			threshold_low);
+
+
+
+
+
+
+
+
+
+
+VL53L1_Error VL53L1_set_GPIO_rate_threshold(
+	VL53L1_DEV                      Dev,
+	uint16_t			threshold_high,
+	uint16_t			threshold_low);
+
+
+
+
+
+
+
+
+
+
+VL53L1_Error VL53L1_set_GPIO_thresholds_from_struct(
+	VL53L1_DEV                      Dev,
+	VL53L1_GPIO_interrupt_config_t *pintconf);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+VL53L1_Error VL53L1_set_ref_spad_char_config(
+	VL53L1_DEV    Dev,
+	uint8_t       vcsel_period_a,
+	uint32_t      phasecal_timeout_us,
+	uint16_t      total_rate_target_mcps,
+	uint16_t      max_count_rate_rtn_limit_mcps,
+	uint16_t      min_count_rate_rtn_limit_mcps,
+	uint16_t      fast_osc_frequency);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+VL53L1_Error VL53L1_set_ssc_config(
+	VL53L1_DEV           Dev,
+	VL53L1_ssc_config_t *pssc_cfg,
+	uint16_t             fast_osc_frequency);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+VL53L1_Error VL53L1_get_spad_rate_data(
+	VL53L1_DEV                Dev,
+	VL53L1_spad_rate_data_t  *pspad_rates);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+uint16_t VL53L1_calc_crosstalk_plane_offset_with_margin(
+		uint16_t     plane_offset_kcps,
+		int16_t      margin_offset_kcps);
 
 
 #ifdef __cplusplus
@@ -1174,4 +1509,5 @@ VL53L1_Error VL53L1_FCTN_00103(
 #endif
 
 #endif
+
 

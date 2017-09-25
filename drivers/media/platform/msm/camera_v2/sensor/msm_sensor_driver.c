@@ -17,6 +17,9 @@
 #include "camera.h"
 #include "msm_cci.h"
 #include "msm_camera_dt_util.h"
+#ifdef CONFIG_QPNP_FLASH_STROBE_OVERRIDE
+#include <linux/moto_flash_strobe.h>
+#endif
 
 /* Logging macro */
 #undef CDBG
@@ -29,8 +32,6 @@ static int32_t msm_sensor_driver_platform_probe(struct platform_device *pdev);
 
 /* Static declaration */
 static struct msm_sensor_ctrl_t *g_sctrl[MAX_CAMERAS];
-
-extern void flash_led_strobe_en(int flag);
 
 static int msm_sensor_platform_remove(struct platform_device *pdev)
 {
@@ -770,12 +771,9 @@ int32_t msm_sensor_driver_probe(void *setting,
 		 */
 		if (slave_info->sensor_id_info.sensor_id ==
 			s_ctrl->sensordata->cam_slave_info->
-				sensor_id_info.sensor_id &&
-			!(strcmp(slave_info->sensor_name,
-			s_ctrl->sensordata->cam_slave_info->sensor_name))) {
-			pr_err("slot%d: sensor name: %s sensor id%d already probed\n",
+				sensor_id_info.sensor_id) {
+			pr_err("slot%d: sensor id%d already probed\n",
 				slave_info->camera_id,
-				slave_info->sensor_name,
 				s_ctrl->sensordata->cam_slave_info->
 					sensor_id_info.sensor_id);
 			msm_sensor_fill_sensor_info(s_ctrl,
@@ -977,11 +975,6 @@ free_camera_info:
 	s_ctrl->sensordata->power_info.power_down_setting = NULL;
 	kfree(camera_info);
 free_slave_info:
-	kfree(s_ctrl->sensordata->power_info.power_setting);
-	kfree(s_ctrl->sensordata->power_info.power_down_setting);
-	s_ctrl->sensordata->power_info.power_setting = NULL;
-	s_ctrl->sensordata->power_info.power_down_setting = NULL;
-
 	kfree(slave_info);
 	return rc;
 }
@@ -1101,8 +1094,10 @@ static int32_t msm_sensor_driver_get_dt_data(struct msm_sensor_ctrl_t *s_ctrl)
 	CDBG("%s qcom,rear_prox_interfering = %d\n", __func__,
 		sensordata->sensor_info->is_rear_prox_interfering);
 
+#ifdef CONFIG_QPNP_FLASH_STROBE_OVERRIDE
 	s_ctrl->no_hw_strobe  =
 		of_property_read_bool(of_node, "qcom,no_hw_strobe");
+#endif
 
 	return rc;
 
@@ -1168,10 +1163,12 @@ static int32_t msm_sensor_driver_parse(struct msm_sensor_ctrl_t *s_ctrl)
 	g_sctrl[s_ctrl->id] = s_ctrl;
 	CDBG("g_sctrl[%d] %pK", s_ctrl->id, g_sctrl[s_ctrl->id]);
 
+#ifdef CONFIG_QPNP_FLASH_STROBE_OVERRIDE
 	if (s_ctrl->no_hw_strobe) {
 		flash_led_strobe_en(0);
 		pr_info("%s force sw strobe, id %d\n", __func__, s_ctrl->id);
 	}
+#endif
 
 	return rc;
 

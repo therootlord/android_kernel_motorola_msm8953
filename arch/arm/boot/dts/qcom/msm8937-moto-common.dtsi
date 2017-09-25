@@ -358,6 +358,7 @@
 		status = "okay";
 		stml0xx: stml0xx@0 {
 			 compatible = "stm,stml0xx";
+			 stml0xx_fw_version = "stml05x";
 			 status = "okay";
 			 reg = <0>;
 			 spi-max-frequency = <8000000>;
@@ -607,6 +608,7 @@
 	qcom,bmd-algo-disabled;
 	qcom,bmd-pin-src = "bpd_none";
 	qcom,usbid-disabled;
+	qcom,usbid-gpio-enabled;
 	qcom,force-aicl-rerun;
 	qcom,auto-voltage-comp-mv = <150>;
 	qcom,enable-hvdcp-9v;
@@ -695,4 +697,18 @@
 			status = "okay";
 		};
 	};
+};
+
+&apc_vreg_corner {
+	qcom,cpr-virtual-corner-init-voltage-adjustment =
+			<50000 50000 50000 50000 50000 75000 50000>,
+			<50000 50000 50000 50000 50000 75000 50000>,
+			<50000 50000 50000 50000 50000 75000 50000>,
+			<50000 50000 50000 50000 50000 75000 50000>;
+
+	qcom,cpr-virtual-corner-quotient-adjustment =
+			<100 100 100 100 100 150 100>,
+			<100 100 100 100 100 150 100>,
+			<100 100 100 100 100 150 100>,
+			<100 100 100 100 100 150 100>;
 };

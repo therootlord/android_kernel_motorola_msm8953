@@ -285,7 +285,7 @@
 			status = "ok";
 			reg = <0x1000 0x100>;
 			compatible = "qcom,leds-atc";
-			linux,name = "white";
+			linux,name = "charging";
 			qcom,ctrl-reg = <0x243>;
 		};
 	};
@@ -328,4 +328,10 @@
 			};
 		};
 	};
+};
+
+&pmi8950_charger {
+	qcom,enable-charging-limit;
+	qcom,upper-limit-capacity = <80>;
+	qcom,lower-limit-capacity = <60>;
 };

@@ -2758,7 +2758,6 @@ int usb_add_hcd(struct usb_hcd *hcd,
 		hcd->authorized_default = hcd->wireless ? 0 : 1;
 	else
 		hcd->authorized_default = authorized_default;
-	set_bit(HCD_FLAG_HW_ACCESSIBLE, &hcd->flags);
 
 	/* HC is in reset state, but accessible.  Now do the one-time init,
 	 * bottom up so that hcds can customize the root hubs before hub_wq
@@ -2845,6 +2844,7 @@ int usb_add_hcd(struct usb_hcd *hcd,
 		goto err_hcd_driver_start;
 	}
 
+	set_bit(HCD_FLAG_HW_ACCESSIBLE, &hcd->flags);
 	/* starting here, usbcore will pay attention to this root hub */
 	if ((retval = register_root_hub(hcd)) != 0)
 		goto err_register_root_hub;
@@ -2939,6 +2939,9 @@ void usb_remove_hcd(struct usb_hcd *hcd)
 #ifdef CONFIG_PM_RUNTIME
 	cancel_work_sync(&hcd->wakeup_work);
 #endif
+
+	/* handle any pending hub events before XHCI stops */
+	usb_flush_hub_wq();
 
 	mutex_lock(&usb_bus_list_lock);
 	usb_disconnect(&rhdev);		/* Sets rhdev to NULL */

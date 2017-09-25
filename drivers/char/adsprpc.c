@@ -1063,7 +1063,7 @@ static int get_args(uint32_t kernel, struct smq_invoke_ctx *ctx)
 	for (oix = 0; oix < inbufs + outbufs; ++oix) {
 		int i = ctx->overps[oix]->raix;
 		struct fastrpc_mmap *map = ctx->maps[i];
-		ssize_t mlen = ctx->overps[oix]->mend - ctx->overps[oix]->mstart;
+		ssize_t mlen;
 		uint64_t buf;
 		ssize_t len = lpra[i].buf.len;
 		if (!len)
@@ -1074,6 +1074,7 @@ static int get_args(uint32_t kernel, struct smq_invoke_ctx *ctx)
 			rlen -= ALIGN(args, BALIGN) - args;
 			args = ALIGN(args, BALIGN);
 		}
+		mlen = ctx->overps[oix]->mend - ctx->overps[oix]->mstart;
 		VERIFY(err, rlen >= mlen);
 		if (err)
 			goto bail;
@@ -1873,7 +1874,8 @@ static void file_free_work_handler(struct work_struct *w)
 			break;
 		}
 		mutex_unlock(&me->flfree_mutex);
-		fastrpc_file_free(freefl->fl);
+		if (freefl)
+			fastrpc_file_free(freefl->fl);
 		mutex_lock(&me->flfree_mutex);
 
 		if (hlist_empty(&me->fls)) {

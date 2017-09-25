@@ -2,7 +2,8 @@
 /*
 * Copyright (c) 2016, STMicroelectronics - All Rights Reserved
 *
-* This file is part of VL53L1 Core and is dual licensed, either 'STMicroelectronics Proprietary license'
+* This file is part of VL53L1 Core and is dual licensed, either 'STMicroelectronics
+* Proprietary license'
 * or 'BSD 3-clause "New" or "Revised" License' , at your option.
 *
 ********************************************************************************
@@ -11,7 +12,8 @@
 *
 ********************************************************************************
 *
-* License terms: STMicroelectronics Proprietary in accordance with licensing terms at www.st.com/sla0044
+* License terms: STMicroelectronics Proprietary in accordance with licensing
+* terms at www.st.com/sla0044
 *
 * STMicroelectronics confidential
 * Reproduction and Communication of this document is strictly prohibited unless
@@ -21,7 +23,8 @@
 ********************************************************************************
 *
 * Alternatively, VL53L1 Core may be distributed under the terms of
-* 'BSD 3-clause "New" or "Revised" License', in which case the following provisions apply instead of the ones
+* 'BSD 3-clause "New" or "Revised" License', in which case the following
+* provisions apply instead of the ones
 * mentioned above :
 *
 ********************************************************************************
@@ -125,15 +128,15 @@ extern "C" {
 
 
 
-VL53L1_Error VL53L1_FCTN_00082(
+VL53L1_Error VL53L1_init_zone_config_structure(
 	uint8_t x_off,
 	uint8_t x_inc,
 	uint8_t x_zones,
 	uint8_t y_off,
 	uint8_t y_inc,
 	uint8_t y_zones,
-	uint8_t VL53L1_PRM_00017,
-	uint8_t VL53L1_PRM_00018,
+	uint8_t width,
+	uint8_t height,
 	VL53L1_zone_config_t   *pdata);
 
 
@@ -151,14 +154,29 @@ VL53L1_Error VL53L1_FCTN_00082(
 
 
 
-VL53L1_Error VL53L1_FCTN_00081(
+VL53L1_Error VL53L1_zone_preset_xtalk_planar(
 	VL53L1_general_config_t	*pgeneral,
 	VL53L1_zone_config_t    *pzone_cfg);
 
+
+
+
+
+
+
+
+
+
+
+
+
+VL53L1_Error VL53L1_init_zone_config_histogram_bins(
+	VL53L1_zone_config_t   *pdata);
 
 #ifdef __cplusplus
 }
 #endif
 
 #endif
+
 

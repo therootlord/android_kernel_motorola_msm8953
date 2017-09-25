@@ -2,7 +2,8 @@
 /*
 * Copyright (c) 2016, STMicroelectronics - All Rights Reserved
 *
-* This file is part of VL53L1 Core and is dual licensed, either 'STMicroelectronics Proprietary license'
+* This file is part of VL53L1 Core and is dual licensed, either 'STMicroelectronics
+* Proprietary license'
 * or 'BSD 3-clause "New" or "Revised" License' , at your option.
 *
 ********************************************************************************
@@ -11,7 +12,8 @@
 *
 ********************************************************************************
 *
-* License terms: STMicroelectronics Proprietary in accordance with licensing terms at www.st.com/sla0044
+* License terms: STMicroelectronics Proprietary in accordance with licensing
+* terms at www.st.com/sla0044
 *
 * STMicroelectronics confidential
 * Reproduction and Communication of this document is strictly prohibited unless
@@ -21,7 +23,8 @@
 ********************************************************************************
 *
 * Alternatively, VL53L1 Core may be distributed under the terms of
-* 'BSD 3-clause "New" or "Revised" License', in which case the following provisions apply instead of the ones
+* 'BSD 3-clause "New" or "Revised" License', in which case the following
+* provisions apply instead of the ones
 * mentioned above :
 *
 ********************************************************************************
@@ -115,7 +118,7 @@ extern "C" {
 
 
 
-VL53L1_Error VL53L1_FCTN_00046(
+VL53L1_Error VL53L1_wait_for_boot_completion(
 	VL53L1_DEV      Dev);
 
 
@@ -134,7 +137,7 @@ VL53L1_Error VL53L1_FCTN_00046(
 
 
 
-VL53L1_Error VL53L1_FCTN_00025(
+VL53L1_Error VL53L1_wait_for_firmware_ready(
 	VL53L1_DEV      Dev);
 
 
@@ -150,7 +153,7 @@ VL53L1_Error VL53L1_FCTN_00025(
 
 
 
-VL53L1_Error VL53L1_FCTN_00023(
+VL53L1_Error VL53L1_wait_for_range_completion(
 	VL53L1_DEV   Dev);
 
 
@@ -166,7 +169,7 @@ VL53L1_Error VL53L1_FCTN_00023(
 
 
 
-VL53L1_Error VL53L1_FCTN_00030(
+VL53L1_Error VL53L1_wait_for_test_completion(
 	VL53L1_DEV   Dev);
 
 
@@ -186,7 +189,7 @@ VL53L1_Error VL53L1_FCTN_00030(
 
 
 
-VL53L1_Error VL53L1_FCTN_00217(
+VL53L1_Error VL53L1_is_boot_complete(
 	VL53L1_DEV      Dev,
 	uint8_t        *pready);
 
@@ -204,33 +207,7 @@ VL53L1_Error VL53L1_FCTN_00217(
 
 
 
-VL53L1_Error VL53L1_FCTN_00219(
-	VL53L1_DEV      Dev,
-	uint8_t        *pready);
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-VL53L1_Error VL53L1_FCTN_00015(
+VL53L1_Error VL53L1_is_firmware_ready(
 	VL53L1_DEV      Dev,
 	uint8_t        *pready);
 
@@ -256,8 +233,34 @@ VL53L1_Error VL53L1_FCTN_00015(
 
 
 
+VL53L1_Error VL53L1_is_new_data_ready(
+	VL53L1_DEV      Dev,
+	uint8_t        *pready);
 
-VL53L1_Error VL53L1_FCTN_00002(
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+VL53L1_Error VL53L1_poll_for_boot_completion(
 	VL53L1_DEV      Dev,
 	uint32_t        timeout_ms);
 
@@ -275,7 +278,7 @@ VL53L1_Error VL53L1_FCTN_00002(
 
 
 
-VL53L1_Error VL53L1_FCTN_00218(
+VL53L1_Error VL53L1_poll_for_firmware_ready(
 	VL53L1_DEV      Dev,
 	uint32_t        timeout_ms);
 
@@ -300,7 +303,7 @@ VL53L1_Error VL53L1_FCTN_00218(
 
 
 
-VL53L1_Error VL53L1_FCTN_00016(
+VL53L1_Error VL53L1_poll_for_range_completion(
 	VL53L1_DEV   Dev,
 	uint32_t     timeout_ms);
 
@@ -311,4 +314,5 @@ VL53L1_Error VL53L1_FCTN_00016(
 #endif
 
 #endif
+
 

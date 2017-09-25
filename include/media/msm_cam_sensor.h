@@ -157,6 +157,7 @@ struct msm_actuator_params_t32 {
 	compat_uptr_t reg_tbl_params;
 	compat_uptr_t init_settings;
 	struct park_lens_data_t park_lens;
+	struct msm_actuator_get_pos_cfg_t get_pos_cfg;
 };
 
 struct msm_actuator_set_info_t32 {
@@ -191,6 +192,7 @@ struct msm_actuator_cfg_data32 {
 		struct msm_actuator_set_info_t32 set_info;
 		struct msm_actuator_get_info_t get_info;
 		struct msm_actuator_set_position_t setpos;
+		struct msm_actuator_get_position_t getpos;
 		enum af_camera_name cam_name;
 	} cfg;
 };
@@ -248,6 +250,7 @@ struct msm_flash_cfg_data_t32 {
 	int32_t flash_current[MAX_LED_TRIGGERS];
 	int32_t flash_duration[MAX_LED_TRIGGERS];
 	enum flash_position position;
+	enum mux_sel_option mux_sel;
 	union {
 		compat_uptr_t flash_init_info;
 		compat_uptr_t settings;
