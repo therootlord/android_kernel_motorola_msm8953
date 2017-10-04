@@ -413,6 +413,7 @@ KBUILD_CFLAGS   := $(GRAPHITE) -Wall -Wundef -Wstrict-prototypes -Wno-trigraphs 
 		   -fno-strict-aliasing -fno-common \
 		   -Werror-implicit-function-declaration \
 		   -Wno-format-security \
+		   -mcpu=cortex-a53 -mfpu=crypto-neon-fp-armv8 \
 		   -std=gnu89
 
 KBUILD_AFLAGS_KERNEL :=
