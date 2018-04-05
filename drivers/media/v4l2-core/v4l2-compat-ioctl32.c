@@ -382,9 +382,13 @@ static int get_v4l2_plane32(struct v4l2_plane __user *up,
 	compat_ulong_t p;
 
 	if (copy_in_user(up, up32, 2 * sizeof(__u32)) ||
-	    copy_in_user(&up->data_offset, &up32->data_offset,
-			 sizeof(up->data_offset)))
-		return -EFAULT;
+		copy_in_user(&up->data_offset, &up32->data_offset,
+				sizeof(up->data_offset)) ||
+		copy_in_user(up->reserved, up32->reserved,
+				sizeof(up->reserved)) ||
+		copy_in_user(&up->length, &up32->length,
+			 sizeof(up->length)))
+			return -EFAULT;
 
 	switch (memory) {
 	case V4L2_MEMORY_MMAP:
@@ -414,9 +418,11 @@ static int put_v4l2_plane32(struct v4l2_plane __user *up,
 	unsigned long p;
 
 	if (copy_in_user(up32, up, 2 * sizeof(__u32)) ||
+		copy_in_user(up32->reserved, up->reserved,
+			 sizeof(up->reserved)) ||
 	    copy_in_user(&up32->data_offset, &up->data_offset,
 			 sizeof(up->data_offset)))
-		return -EFAULT;
+			return -EFAULT;
 
 	switch (memory) {
 	case V4L2_MEMORY_MMAP:
@@ -462,7 +468,6 @@ static int bufsize_v4l2_buffer(struct v4l2_buffer32 __user *up, u32 *size)
 	} else {
 		*size = 0;
 	}
-
 	return 0;
 }
 
@@ -894,6 +899,9 @@ static int put_v4l2_ext_controls32(struct file *file,
 struct v4l2_event32 {
 	__u32				type;
 	union {
+		struct v4l2_event_vsync		vsync;
+		struct v4l2_event_ctrl		ctrl;
+		struct v4l2_event_frame_sync	frame_sync;
 		__u8			data[64];
 	} u;
 	__u32				pending;
